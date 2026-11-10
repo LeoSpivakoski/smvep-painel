@@ -1,0 +1,40 @@
+{
+  "name": "smvep-painel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Recebe os ciclos de estacionamento enviados pela Jetson (POST /ciclos) e mostra no painel do SMVEP.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n receptor,web -c cyan,magenta \"npm:dev:receptor\" \"npm:dev:web\"",
+    "dev:receptor": "node --watch server/index.ts",
+    "dev:web": "vite",
+    "build": "npm run verificar && vite build",
+    "start": "node server/index.ts",
+    "test": "node --test \"server/**/*.test.ts\" \"shared/**/*.test.ts\"",
+    "verificar": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "simular": "node scripts/simular.ts"
+  },
+  "dependencies": {
+    "@fastify/static": "^10.1.10",
+    "fastify": "^5.12.8",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5",
+    "concurrently": "^10.0.7",
+    "typescript": "^7.0.2",
+    "vite": "^7"
+  },
+  "overrides": {
+    "rollup": "npm:@rollup/wasm-node@^4"
+  }
+}

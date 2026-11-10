@@ -1,0 +1,5 @@
+node_modules/
+web/dist/
+# Ciclos recebidos da Jetson (fotos e dados.json)
+dados/
+*.log

@@ -1,0 +1,250 @@
+===============================================================================
+ SMVEP - PAINEL DE MONITORAMENTO DE VAGAS
+ Passo a passo: visão numa máquina, painel em outra
+===============================================================================
+
+O QUE ESTÁ NO PEN DRIVE
+-----------------------
+  node-v24.22.2-x64.msi         instalador oficial do Node.js 24 LTS para
+                                Windows 64 bits (de nodejs.org; SHA-256
+                                9231bf64d19bef391dd5ee8af65411d3799c3c44a842d2320849cc1da60b6b6d)
+  SMVEP-Painel\                 o painel (tela + receptor), pronto para rodar
+    INICIAR-PAINEL.cmd          inicia o painel com dois cliques (Windows)
+    PASSO-A-PASSO.txt           este arquivo
+    README.md                   documentação técnica
+    exemplos\                   5 ciclos reais gravados, para testar sem a câmera
+    node_modules\, web\dist\    dependências e tela já compiladas: não precisa
+                                de internet para rodar
+
+COMO FUNCIONA
+-------------
+  MÁQUINA DE VISÃO (a que roda o CodigosVisao-Embarcado)
+      python main.py ...      processa o vídeo e grava output\smvep.db
+      python -m sender        lê a fila do banco e envia cada ciclo completo
+              |
+              |   POST http://<IP-DO-PAINEL>:8000/ciclos   (pela rede)
+              v
+  MÁQUINA DO PAINEL (a outra)
+      SMVEP-Painel, porta 8000: grava os ciclos e mostra na tela
+      tela: http://localhost:8000
+
+  Um "ciclo" chega quando um carro entra numa vaga E sai dela. Carro ainda
+  parado não aparece no painel até sair.
+
+
+===============================================================================
+ PARTE 1 - MÁQUINA DO PAINEL
+===============================================================================
+
+1) Instale o Node.js 24 ou mais novo
+   Dois cliques em  node-v24.22.2-x64.msi  (na raiz do pen drive) e instale
+   com as opções padrão: Next, aceite a licença, Next... Install. Precisa de
+   permissão de administrador; não precisa de internet.
+   (Outro sistema, ou Windows ARM: baixe a versão LTS em https://nodejs.org)
+   Depois, num terminal NOVO (PowerShell ou Prompt de Comando), confira:
+
+       node -v
+
+   Tem que aparecer v24.x.x ou maior.
+
+2) Copie a pasta SMVEP-Painel do pen drive para o disco, por exemplo:
+
+       C:\SMVEP-Painel
+
+   (Dá para rodar direto do pen drive, mas os ciclos recebidos são gravados
+   dentro da pasta. Prefira o disco.)
+
+3) Inicie o painel
+   Opção A: dois cliques em  C:\SMVEP-Painel\INICIAR-PAINEL.cmd
+   Opção B: num terminal:
+
+       cd C:\SMVEP-Painel
+       node server\index.ts
+
+   Deixe a janela aberta enquanto o painel estiver em uso.
+   Para parar: feche a janela ou aperte Ctrl+C.
+
+4) Anote o IP que aparece na janela, numa linha parecida com esta:
+
+       [RECEPTOR] Ethernet: painel em http://192.168.0.20:8000  |  envio: python -m sender --url http://192.168.0.20:8000/ciclos
+
+   Se aparecer mais de uma linha (Wi-Fi, Ethernet, VPN), use o IP da mesma
+   rede em que está a máquina de visão. Para o IP não mudar, fixe-o no
+   roteador (reserva de DHCP) ou nas configurações da placa de rede.
+
+5) Libere a porta 8000 no firewall
+   Na primeira vez, o Windows pergunta se o Node.js pode usar a rede:
+   marque "Redes privadas" e clique em "Permitir acesso".
+
+   Se a pergunta não aparecer, abra o PowerShell como ADMINISTRADOR e rode:
+
+       New-NetFirewallRule -DisplayName "SMVEP painel (8000)" -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow -Profile Private
+
+   Se a rede estiver marcada como "Pública" no Windows, mude para "Privada"
+   (Configurações > Rede e Internet > propriedades da rede) ou troque
+   "-Profile Private" por "-Profile Any" no comando acima.
+
+   Linux (ufw):
+
+       sudo ufw allow 8000/tcp
+
+6) Abra a tela no navegador
+
+       http://localhost:8000
+
+   De outro computador da mesma rede:  http://<IP-DO-PAINEL>:8000
+   A pílula verde "ONLINE" no topo indica que a tela está ligada ao receptor.
+
+7) (Opcional) Teste a tela com os exemplos, sem a máquina de visão
+   Com o painel rodando, abra um SEGUNDO terminal:
+
+       cd C:\SMVEP-Painel
+       node scripts\simular.ts exemplos --intervalo 3
+
+   Os 5 ciclos de exemplo aparecem na tela, um a cada 3 segundos.
+   Para começar do zero depois do teste: pare o painel, apague a pasta
+   C:\SMVEP-Painel\dados e inicie de novo.
+
+
+===============================================================================
+ PARTE 2 - MÁQUINA DE VISÃO
+===============================================================================
+
+Tudo a partir da pasta CodigosVisao-Embarcado: é nela que estão
+output\smvep.db e a pasta sender. Troque <IP-DO-PAINEL> pelo IP anotado
+no passo 4 da Parte 1.
+
+1) Teste se o painel responde:
+
+       curl.exe http://<IP-DO-PAINEL>:8000/api/status
+
+   Resposta esperada:  {"ok":true,"ciclos":...}
+   Se der timeout: confira o firewall (Parte 1, passo 5), se as duas
+   máquinas estão na mesma rede e se o IP está certo.
+
+2) Terminal 1 - processamento (o comando de sempre), por exemplo:
+
+       cd C:\Users\leosp\Desktop\CodigosVisao-Embarcado
+       python main.py --media <video> --model <modelo>
+
+3) Terminal 2 - envio para o painel:
+
+       cd C:\Users\leosp\Desktop\CodigosVisao-Embarcado
+       python -m sender --url http://<IP-DO-PAINEL>:8000/ciclos
+
+   Deixe aberto. Ele consulta a fila a cada 2 segundos e envia cada ciclo
+   completo. Pode ser iniciado antes ou depois do processamento, e parado e
+   reiniciado quando quiser: o que ainda não foi enviado fica na fila do
+   banco. Se o painel cair, o envio tenta de novo sozinho, a cada 2 segundos.
+
+   Não clique dentro da janela do envio nem da do processamento: no console
+   do Windows, um clique entra no modo "Selecionar" (aparece no título da
+   janela) e congela o programa até alguém apertar Enter ou Esc. Se isso
+   acontecer, aperte Esc. Para desligar de vez nessas janelas: clique com o
+   botão direito na barra de título > Propriedades > desmarque "Modo de
+   Edição Rápida".
+
+   Para não digitar a URL toda vez (PowerShell, vale para aquele terminal):
+
+       $env:SMVEP_ENVIO_URL = "http://<IP-DO-PAINEL>:8000/ciclos"
+       python -m sender
+
+
+===============================================================================
+ PARTE 3 - SENHA COMPARTILHADA (TOKEN), OPCIONAL
+===============================================================================
+
+Sem token, qualquer máquina da rede consegue enviar ciclos ao painel. Para
+exigir uma senha, use o MESMO valor nas duas máquinas, sempre antes de iniciar
+cada programa (PowerShell):
+
+  Máquina do painel:
+
+       cd C:\SMVEP-Painel
+       $env:SMVEP_ENVIO_TOKEN = "troque-por-um-segredo"
+       node server\index.ts
+
+  Máquina de visão:
+
+       cd C:\Users\leosp\Desktop\CodigosVisao-Embarcado
+       $env:SMVEP_ENVIO_TOKEN = "troque-por-um-segredo"
+       python -m sender --url http://<IP-DO-PAINEL>:8000/ciclos
+
+  Com token, inicie o painel pelo terminal (a variável não passa para o
+  INICIAR-PAINEL.cmd aberto com dois cliques).
+
+
+===============================================================================
+ PARTE 4 - CONFIGURAÇÕES DO PAINEL (OPCIONAIS)
+===============================================================================
+
+Defina no PowerShell antes de  node server\index.ts :
+
+  Outra porta (use a mesma porta na URL do envio):
+       $env:SMVEP_PORTA = "8080"
+
+  Outra pasta para os ciclos recebidos:
+       $env:SMVEP_DADOS = "D:\smvep-ciclos"
+
+Onde ficam os ciclos: C:\SMVEP-Painel\dados\ciclos\  (uma pasta por ciclo,
+com dados.json, linha.jpg, entrada.jpg e saida.jpg). Para backup, copie essa
+pasta.
+
+
+===============================================================================
+ PARTE 5 - SE O CÓDIGO DO PAINEL MUDAR (RECOMPILAR)
+===============================================================================
+
+Precisa de internet. Na pasta do painel:
+
+       cd C:\SMVEP-Painel
+       npm install
+       npm run build
+       node server\index.ts
+
+Se o PowerShell disser que "a execução de scripts foi desabilitada", use
+npm.cmd no lugar de npm (npm.cmd install, npm.cmd run build) ou rode os
+comandos no Prompt de Comando (cmd).
+
+
+===============================================================================
+ PROBLEMAS COMUNS
+===============================================================================
+
+  curl.exe .../api/status dá timeout
+      Firewall da máquina do painel, redes diferentes ou IP errado.
+
+  "node" não é reconhecido / INICIAR-PAINEL.cmd fala do Node.js
+      Instale o Node.js 24+ e abra um terminal novo.
+
+  Erro "address already in use" / porta 8000 ocupada
+      Já tem um painel aberto (feche a outra janela) ou outro programa usa a
+      porta: escolha outra com SMVEP_PORTA (Parte 4).
+
+  O envio mostra HTTP 401
+      SMVEP_ENVIO_TOKEN diferente entre as duas máquinas (Parte 3).
+
+  O envio mostra HTTP 422
+      O ciclo não passou na validação; a mensagem diz qual campo.
+
+  O envio roda sem erro, mas nada chega
+      Só chegam ciclos COMPLETOS (o carro entrou e saiu da vaga). Paradas
+      abertas e carros parados no fim do vídeo não são enviados.
+
+  Pílula RECONECTANDO ou OFFLINE na tela
+      A tela perdeu o contato com o receptor (janela do painel fechada?).
+      Ela volta sozinha quando o painel voltar.
+
+  Os ciclos só aparecem depois de apertar Enter numa janela
+      É o modo "Selecionar" do console do Windows (veja a Parte 2, passo 3).
+      A janela do painel já desliga isso ao iniciar e mostra a linha
+      "Edição rápida do console desligada". Nas janelas do envio e do
+      processamento, aperte Esc ou desmarque "Modo de Edição Rápida" nas
+      propriedades da janela.
+
+  Consultar a fila de envio na máquina de visão (Python):
+
+       cd C:\Users\leosp\Desktop\CodigosVisao-Embarcado
+       python -c "import sqlite3; c=sqlite3.connect('output/smvep.db'); [print(r) for r in c.execute('SELECT vid, ciclo, encerrado_por, enviado_em, envio_erro FROM estacionamentos WHERE ciclo_completo = 1 ORDER BY id')]"
+
+   enviado_em preenchido = o painel confirmou; envio_erro = última falha.

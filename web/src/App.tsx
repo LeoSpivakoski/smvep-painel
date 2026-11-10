@@ -1,0 +1,39 @@
+import { useState } from "react";
+import { Cabecalho } from "./components/Cabecalho.tsx";
+import { DetalhesRegistro } from "./components/DetalhesRegistro.tsx";
+import { Historico } from "./components/Historico.tsx";
+import { VisorFotos } from "./components/VisorFotos.tsx";
+import { useCiclos } from "./useCiclos.ts";
+
+const LIMITE_HISTORICO = 30;
+
+export function App() {
+  const { ciclos, conexao, carregado } = useCiclos(LIMITE_HISTORICO);
+  // `null` = acompanhar o mais recente: cada ciclo novo passa a ser o exibido.
+  // Um ciclo antigo escolhido no histórico fica na tela até o usuário voltar ao primeiro.
+  const [escolhido, setEscolhido] = useState<string | null>(null);
+
+  const selecionado = (escolhido && ciclos.find((ciclo) => ciclo.id_envio === escolhido)) || ciclos[0] || null;
+
+  function selecionar(idEnvio: string) {
+    setEscolhido(idEnvio === ciclos[0]?.id_envio ? null : idEnvio);
+  }
+
+  let mensagemVazia = "Aguardando o primeiro ciclo da Jetson";
+  if (!carregado) mensagemVazia = "Carregando…";
+  else if (conexao === "offline") mensagemVazia = "Sem conexão com o receptor";
+
+  return (
+    <div className="app">
+      <Cabecalho conexao={conexao} />
+      <main className="conteudo">
+        <div className="coluna-principal">
+          {/* key: cada detecção selecionada abre o visor de novo na linha de snap */}
+          <VisorFotos key={selecionado?.id_envio ?? "vazio"} ciclo={selecionado} mensagemVazia={mensagemVazia} />
+          <Historico ciclos={ciclos} selecionado={selecionado?.id_envio ?? null} onSelecionar={selecionar} />
+        </div>
+        <DetalhesRegistro ciclo={selecionado} />
+      </main>
+    </div>
+  );
+}
