@@ -1,27 +1,33 @@
-// Guarda os ciclos recebidos em disco, uma pasta por ciclo:
-//   <raiz>/<id_envio sem ':'>/dados.json, linha.jpg, entrada.jpg, saida.jpg
-// É o mesmo layout do receptor de teste da Jetson (sender/receiver.py), então
-// as pastas gravadas por ele também abrem aqui. O índice fica em memória.
+// Guarda os ciclos recebidos do host em disco, uma pasta por ciclo:
+//   <raiz>/<chave sem ':'>/dados.json, linha.jpg, entrada.jpg, saida.jpg
+// A chave é "<dispositivo>:<id>:<início>" (chaveDoCiclo). Pastas gravadas por
+// versões anteriores (com a chave no dados.json, ou o id_envio do antigo envio
+// por POST) continuam abrindo. O índice fica em memória. Um ciclo que volta com
+// `revisao` maior é regravado na mesma pasta.
 import { createHash } from "node:crypto";
 import { mkdir, open, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { NOMES_FOTOS, compararRecentes } from "../shared/ciclo.ts";
 import type { Ciclo, FotosCiclo, NomeFoto } from "../shared/ciclo.ts";
+import { chaveDoCiclo, revisaoDoCiclo } from "../shared/esquema.ts";
 import type { CicloRecebido } from "../shared/esquema.ts";
 
 export const PREFIXO_FOTOS = "/fotos";
 
-/** Mesmo nome de pasta do sender/receiver.py: só letras, dígitos, `.`, `_` e `-`. */
-export function nomePasta(idEnvio: string): string {
-  return idEnvio.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 200) || "sem_id";
+/** Nome de pasta válido também no Windows: só letras, dígitos, `.`, `_` e `-`. */
+export function nomePasta(chave: string): string {
+  return chave.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 200) || "sem_chave";
 }
 
 export interface ResultadoGravacao {
+  /** A chave já estava gravada com revisão igual ou maior: nada foi escrito. */
   duplicado: boolean;
+  /** A chave já estava gravada e foi regravada com uma revisão maior. */
+  atualizado: boolean;
   ciclo: Ciclo;
 }
 
-/** Grava e força o conteúdo para o disco: o 2xx só pode sair depois disso. */
+/** Grava e força o conteúdo para o disco: a confirmação ao host só sai depois disso. */
 async function gravarArquivo(caminho: string, conteudo: string | Buffer): Promise<void> {
   const arquivo = await open(caminho, "w");
   try {
@@ -34,8 +40,8 @@ async function gravarArquivo(caminho: string, conteudo: string | Buffer): Promis
 
 export class Armazenamento {
   readonly raiz: string;
-  #porId = new Map<string, Ciclo>();
-  #idPorPasta = new Map<string, string>();
+  #porChave = new Map<string, Ciclo>();
+  #chavePorPasta = new Map<string, string>();
   #emAndamento = new Map<string, Promise<ResultadoGravacao>>();
 
   constructor(raiz: string) {
@@ -43,7 +49,7 @@ export class Armazenamento {
   }
 
   get total(): number {
-    return this.#porId.size;
+    return this.#porChave.size;
   }
 
   /** Lê as pastas que já existem. Pastas sem `dados.json` (gravação interrompida) são ignoradas. */
@@ -53,44 +59,55 @@ export class Armazenamento {
     for (const entrada of entradas) {
       if (!entrada.isDirectory()) continue;
       const ciclo = await this.#lerPasta(entrada.name).catch(() => null);
-      if (ciclo && !this.#porId.has(ciclo.id_envio)) {
-        this.#porId.set(ciclo.id_envio, ciclo);
-        this.#idPorPasta.set(entrada.name, ciclo.id_envio);
+      if (ciclo && !this.#porChave.has(ciclo.chave)) {
+        this.#porChave.set(ciclo.chave, ciclo);
+        this.#chavePorPasta.set(entrada.name, ciclo.chave);
       }
     }
-    return this.#porId.size;
+    return this.#porChave.size;
   }
 
   listar(limite: number): Ciclo[] {
-    return [...this.#porId.values()].sort(compararRecentes).slice(0, limite);
+    return [...this.#porChave.values()].sort(compararRecentes).slice(0, limite);
   }
 
-  obter(idEnvio: string): Ciclo | undefined {
-    return this.#porId.get(idEnvio);
+  obter(chave: string): Ciclo | undefined {
+    return this.#porChave.get(chave);
   }
 
   /**
-   * Grava um ciclo novo. Um `id_envio` já gravado (repetição da entrega
-   * "pelo menos uma vez") não é regravado e volta com `duplicado: true`.
+   * Grava um ciclo novo, ou regrava um já gravado quando a `revisao` é maior
+   * (o host alterou o registro depois do primeiro envio). Uma chave já gravada
+   * com revisão igual ou maior (o host reenvia o que não teve confirmação) não
+   * é regravada e volta com `duplicado: true`.
    */
   async gravar(corpo: CicloRecebido): Promise<ResultadoGravacao> {
-    const existente = this.#porId.get(corpo.id_envio);
-    if (existente) return { duplicado: true, ciclo: existente };
-
-    const emAndamento = this.#emAndamento.get(corpo.id_envio);
-    if (emAndamento) return { duplicado: true, ciclo: (await emAndamento).ciclo };
-
-    const gravacao = this.#gravarNovo(corpo);
-    this.#emAndamento.set(corpo.id_envio, gravacao);
+    const chave = chaveDoCiclo(corpo);
+    // Uma gravação por vez em cada chave: a que chega espera a anterior e só
+    // então compara as revisões, com o que ficou gravado.
+    const anterior = this.#emAndamento.get(chave);
+    const gravacao = (anterior ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => this.#gravarSeMaisNovo(chave, corpo));
+    this.#emAndamento.set(chave, gravacao);
     try {
       return await gravacao;
     } finally {
-      this.#emAndamento.delete(corpo.id_envio);
+      if (this.#emAndamento.get(chave) === gravacao) this.#emAndamento.delete(chave);
     }
   }
 
-  async #gravarNovo(corpo: CicloRecebido): Promise<ResultadoGravacao> {
-    const pasta = this.#reservarPasta(corpo.id_envio);
+  async #gravarSeMaisNovo(chave: string, corpo: CicloRecebido): Promise<ResultadoGravacao> {
+    const existente = this.#porChave.get(chave);
+    if (existente && revisaoDoCiclo(corpo) <= revisaoDoCiclo(existente)) {
+      return { duplicado: true, atualizado: false, ciclo: existente };
+    }
+    return this.#gravarPasta(chave, corpo, existente);
+  }
+
+  /** Escreve as fotos e o dados.json; `existente` é o ciclo que esta revisão substitui. */
+  async #gravarPasta(chave: string, corpo: CicloRecebido, existente?: Ciclo): Promise<ResultadoGravacao> {
+    const pasta = this.#reservarPasta(chave);
     try {
       const destino = path.join(this.raiz, pasta);
       await mkdir(destino, { recursive: true });
@@ -110,34 +127,40 @@ export class Armazenamento {
         }
       }
 
-      const recebidoEm = new Date().toISOString();
+      // Uma atualização mantém a data do primeiro recebimento e ganha a própria.
+      const agora = new Date().toISOString();
+      const datas = existente
+        ? { recebido_em: existente.recebido_em, atualizado_em: agora }
+        : { recebido_em: agora };
       const temporario = path.join(destino, "dados.json.tmp");
-      const dados = { ...corpo, fotos: arquivos, recebido_em: recebidoEm };
+      const dados = { chave, ...corpo, fotos: arquivos, ...datas };
       await gravarArquivo(temporario, `${JSON.stringify(dados, null, 2)}\n`);
       await rename(temporario, path.join(destino, "dados.json"));
 
       const ciclo: Ciclo = {
         ...corpo,
+        chave,
         fotos: this.#urlsFotos(pasta, arquivos),
-        recebido_em: recebidoEm,
+        ...datas,
       };
-      this.#porId.set(ciclo.id_envio, ciclo);
-      return { duplicado: false, ciclo };
+      this.#porChave.set(chave, ciclo);
+      return { duplicado: false, atualizado: existente !== undefined, ciclo };
     } catch (erro) {
-      this.#idPorPasta.delete(pasta);
+      // A pasta de um ciclo já gravado continua dele: o dados.json anterior vale.
+      if (!existente) this.#chavePorPasta.delete(pasta);
       throw erro;
     }
   }
 
-  /** Pasta do ciclo; se outro `id_envio` já virou o mesmo nome, acrescenta um hash. */
-  #reservarPasta(idEnvio: string): string {
-    let pasta = nomePasta(idEnvio);
-    const dono = this.#idPorPasta.get(pasta);
-    if (dono !== undefined && dono !== idEnvio) {
-      const hash = createHash("sha1").update(idEnvio).digest("hex").slice(0, 8);
+  /** Pasta do ciclo; se outra chave já virou o mesmo nome, acrescenta um hash. */
+  #reservarPasta(chave: string): string {
+    let pasta = nomePasta(chave);
+    const dono = this.#chavePorPasta.get(pasta);
+    if (dono !== undefined && dono !== chave) {
+      const hash = createHash("sha1").update(chave).digest("hex").slice(0, 8);
       pasta = `${pasta.slice(0, 190)}-${hash}`;
     }
-    this.#idPorPasta.set(pasta, idEnvio);
+    this.#chavePorPasta.set(pasta, chave);
     return pasta;
   }
 
@@ -145,7 +168,12 @@ export class Armazenamento {
     const arquivo = path.join(this.raiz, pasta, "dados.json");
     const [texto, info] = await Promise.all([readFile(arquivo, "utf8"), stat(arquivo)]);
     const dados = JSON.parse(texto);
-    if (typeof dados?.id_envio !== "string" || typeof dados.vid !== "number") return null;
+    if (typeof dados !== "object" || dados === null) return null;
+    let chave: string | null = null;
+    if (typeof dados.chave === "string") chave = dados.chave;
+    else if (typeof dados.id === "number" && typeof dados.dispositivo === "string") chave = chaveDoCiclo(dados);
+    else if (typeof dados.id_envio === "string") chave = dados.id_envio; // antigo envio por POST
+    if (!chave) return null;
     const gravadas = (dados.fotos ?? {}) as Record<string, unknown>;
     const arquivos = {} as Record<NomeFoto, string | null>;
     for (const nome of NOMES_FOTOS) {
@@ -153,8 +181,10 @@ export class Armazenamento {
     }
     return {
       ...dados,
+      chave,
+      id: typeof dados.id === "number" ? dados.id : null,
       fotos: this.#urlsFotos(pasta, arquivos),
-      // O receptor de teste da Jetson não grava recebido_em: usa a data do arquivo.
+      // Pastas antigas sem recebido_em: usa a data do arquivo.
       recebido_em: typeof dados.recebido_em === "string" ? dados.recebido_em : info.mtime.toISOString(),
     } as Ciclo;
   }

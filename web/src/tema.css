@@ -216,6 +216,7 @@ button {
 }
 
 .conexao-conectando,
+.conexao-sem-host,
 .conexao-reconectando {
   color: var(--ambar);
   background: var(--ambar-fundo);

@@ -1,22 +1,20 @@
-// Receptor HTTP do painel.
-//   POST /ciclos          a Jetson entrega cada ciclo completo (contrato do docs/API.md)
-//   GET  /api/ciclos      lista para a tela, mais recentes primeiro
-//   GET  /api/ciclos/:id  um ciclo
-//   GET  /api/eventos     Server-Sent Events: evento `ciclo` a cada ciclo novo
-//   GET  /api/status      saúde do receptor
-//   GET  /fotos/...       fotos dos ciclos
-//   GET  /                tela (build de web/dist), quando existe
-import { timingSafeEqual } from "node:crypto";
+// Servidor do painel. Os ciclos chegam do host pelo WebSocket (conexaoHost.ts),
+// passam por `receber` e ficam gravados em disco; a tela os lê por aqui:
+//   GET  /api/ciclos         lista para a tela, mais recentes primeiro
+//   GET  /api/ciclos/:chave  um ciclo
+//   GET  /api/eventos        Server-Sent Events: `ciclo` a cada ciclo novo ou atualizado
+//                            (revisão maior), `host` quando a conexão com o host muda,
+//                            `ping` a cada 10 s
+//   GET  /api/status         saúde do painel e da conexão com o host
+//   GET  /fotos/...          fotos dos ciclos
+//   GET  /                   tela (build de web/dist), quando existe
 import { existsSync } from "node:fs";
 import type { ServerResponse } from "node:http";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import type { Ciclo, RespostaLista } from "../shared/ciclo.ts";
-import { descreverErros, esquemaCiclo } from "../shared/esquema.ts";
+import { descreverErros, esquemaCiclo, revisaoDoCiclo } from "../shared/esquema.ts";
 import { Armazenamento, PREFIXO_FOTOS } from "./armazenamento.ts";
-
-/** O API.md pede pelo menos 2 MB; os ciclos reais têm de 176 a 425 KB. */
-export const LIMITE_CORPO = 20 * 1024 * 1024;
 
 /** A tela reabre a conexão depois de 2,5 intervalos sem nenhum evento (web/src/useCiclos.ts). */
 export const INTERVALO_PING_MS = 10_000;
@@ -24,19 +22,17 @@ export const INTERVALO_PING_MS = 10_000;
 export interface OpcoesServidor {
   /** Pasta onde cada ciclo vira uma subpasta. */
   pastaDados: string;
-  /** Quando definido, exige `Authorization: Bearer <token>` no POST (SMVEP_ENVIO_TOKEN). */
-  token?: string | null;
   /** Build da tela (web/dist). */
   pastaWeb?: string | null;
+  /** Endereço do host (só para /api/status e para a tela). */
+  host?: string | null;
   log?: (mensagem: string) => void;
   intervaloKeepAliveMs?: number;
 }
 
-function tokenConfere(cabecalho: string | undefined, token: string): boolean {
-  const recebido = Buffer.from(cabecalho ?? "", "utf8");
-  const esperado = Buffer.from(`Bearer ${token}`, "utf8");
-  return recebido.length === esperado.length && timingSafeEqual(recebido, esperado);
-}
+export type ResultadoRecebimento =
+  | { ok: true; chave: string; duplicado: boolean }
+  | { ok: false; erro: string };
 
 function limiteDaConsulta(valor: string | undefined): number {
   const numero = Number.parseInt(valor ?? "", 10);
@@ -47,15 +43,14 @@ export async function criarServidor(opcoes: OpcoesServidor) {
   const log = opcoes.log ?? ((mensagem: string) => console.log(mensagem));
   const armazenamento = new Armazenamento(opcoes.pastaDados);
   await armazenamento.carregar();
+  const estadoHost = { endereco: opcoes.host ?? null, conectado: false };
 
-  const app = Fastify({ bodyLimit: LIMITE_CORPO, logger: false });
+  const app = Fastify({ logger: false });
 
-  // A Jetson guarda os primeiros 300 caracteres da resposta de erro: mensagem curta e clara.
   app.setErrorHandler((erro, requisicao, resposta) => {
     const { statusCode, message } = erro as { statusCode?: number; message?: string };
     const status = statusCode && statusCode >= 400 ? statusCode : 500;
-    if (status >= 500) log(`[RECEPTOR] erro em ${requisicao.method} ${requisicao.url}: ${message}`);
-    else if (requisicao.method === "POST") log(`[RECEPTOR] recusado (${status}): ${message}`);
+    if (status >= 500) log(`[PAINEL] erro em ${requisicao.method} ${requisicao.url}: ${message}`);
     void resposta.code(status).send({ ok: false, erro: message ?? "erro interno" });
   });
 
@@ -66,8 +61,8 @@ export async function criarServidor(opcoes: OpcoesServidor) {
   // ---- Eventos em tempo real para a tela ----
   const clientes = new Set<ServerResponse>();
 
-  function transmitir(ciclo: Ciclo): void {
-    const mensagem = `event: ciclo\ndata: ${JSON.stringify(ciclo)}\n\n`;
+  function transmitir(evento: string, dados: unknown): void {
+    const mensagem = `event: ${evento}\ndata: ${JSON.stringify(dados)}\n\n`;
     for (const cliente of clientes) cliente.write(mensagem);
   }
 
@@ -94,34 +89,44 @@ export async function criarServidor(opcoes: OpcoesServidor) {
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
     });
-    saida.write(`retry: 3000\n\n${PING}`);
+    // Já na abertura: a tela fica sabendo se o host está conectado.
+    saida.write(`retry: 3000\n\n${PING}event: host\ndata: ${JSON.stringify({ conectado: estadoHost.conectado })}\n\n`);
     clientes.add(saida);
     requisicao.raw.on("close", () => clientes.delete(saida));
   });
 
-  // ---- Entrega da Jetson ----
-  app.post("/ciclos", async (requisicao, resposta) => {
-    if (opcoes.token && !tokenConfere(requisicao.headers.authorization, opcoes.token)) {
-      log("[RECEPTOR] recusado (401): token inválido");
-      return resposta.code(401).send({ ok: false, erro: "token inválido" });
-    }
-    const validacao = esquemaCiclo.safeParse(requisicao.body);
+  // ---- Ciclos vindos do host ----
+
+  /** Valida, grava e avisa a tela. Só depois de gravar o host recebe a confirmação. */
+  async function receber(dados: unknown): Promise<ResultadoRecebimento> {
+    const validacao = esquemaCiclo.safeParse(dados);
     if (!validacao.success) {
       const erro = descreverErros(validacao.error);
-      log(`[RECEPTOR] recusado (422): ${erro}`);
-      return resposta.code(422).send({ ok: false, erro });
+      log(`[PAINEL] ciclo recusado: ${erro}`);
+      return { ok: false, erro };
     }
-    // Só responde 2xx depois de gravar: para a Jetson, 2xx é definitivo.
-    const { duplicado, ciclo } = await armazenamento.gravar(validacao.data);
+    const { duplicado, atualizado, ciclo } = await armazenamento.gravar(validacao.data);
     if (duplicado) {
-      log(`[RECEPTOR] ${ciclo.id_envio} repetido (já estava gravado)`);
+      log(`[PAINEL] ciclo ${ciclo.chave} repetido (já estava gravado)`);
     } else {
-      log(`[RECEPTOR] ${ciclo.id_envio} gravado (${ciclo.placa?.texto ?? "sem placa"})`);
-      transmitir(ciclo);
+      const placa = ciclo.placa?.texto ?? "sem placa";
+      log(
+        atualizado
+          ? `[PAINEL] ciclo ${ciclo.chave} atualizado para a revisão ${revisaoDoCiclo(ciclo)} (${placa})`
+          : `[PAINEL] ciclo ${ciclo.chave} gravado (${placa})`,
+      );
+      // Novo ou atualizado: a tela troca o ciclo pela chave (mesclarCiclos).
+      transmitir("ciclo", ciclo);
     }
-    // Repetição também recebe 2xx (nunca 409), senão a Jetson não marca como enviado.
-    return { ok: true, id_envio: ciclo.id_envio, duplicado };
-  });
+    return { ok: true, chave: ciclo.chave, duplicado };
+  }
+
+  /** Chamado pela conexão com o host: a tela mostra SEM HOST quando ela cai. */
+  function definirHostConectado(conectado: boolean): void {
+    if (estadoHost.conectado === conectado) return;
+    estadoHost.conectado = conectado;
+    transmitir("host", { conectado });
+  }
 
   // ---- Leitura para a tela ----
   app.get<{ Querystring: { limite?: string } }>("/api/ciclos", async (requisicao) => {
@@ -132,8 +137,8 @@ export async function criarServidor(opcoes: OpcoesServidor) {
     return resposta;
   });
 
-  app.get<{ Params: { id: string } }>("/api/ciclos/:id", async (requisicao, resposta) => {
-    const ciclo = armazenamento.obter(requisicao.params.id);
+  app.get<{ Params: { chave: string } }>("/api/ciclos/:chave", async (requisicao, resposta) => {
+    const ciclo: Ciclo | undefined = armazenamento.obter(requisicao.params.chave);
     if (!ciclo) return resposta.code(404).send({ ok: false, erro: "ciclo não encontrado" });
     return ciclo;
   });
@@ -142,7 +147,8 @@ export async function criarServidor(opcoes: OpcoesServidor) {
     ok: true,
     ciclos: armazenamento.total,
     conexoes_tela: clientes.size,
-    token_exigido: Boolean(opcoes.token),
+    host: estadoHost.endereco,
+    host_conectado: estadoHost.conectado,
   }));
 
   await app.register(fastifyStatic, {
@@ -161,5 +167,5 @@ export async function criarServidor(opcoes: OpcoesServidor) {
     });
   }
 
-  return { app, armazenamento };
+  return { app, armazenamento, receber, definirHostConectado };
 }

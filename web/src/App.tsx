@@ -13,15 +13,16 @@ export function App() {
   // Um ciclo antigo escolhido no histórico fica na tela até o usuário voltar ao primeiro.
   const [escolhido, setEscolhido] = useState<string | null>(null);
 
-  const selecionado = (escolhido && ciclos.find((ciclo) => ciclo.id_envio === escolhido)) || ciclos[0] || null;
+  const selecionado = (escolhido && ciclos.find((ciclo) => ciclo.chave === escolhido)) || ciclos[0] || null;
 
-  function selecionar(idEnvio: string) {
-    setEscolhido(idEnvio === ciclos[0]?.id_envio ? null : idEnvio);
+  function selecionar(chave: string) {
+    setEscolhido(chave === ciclos[0]?.chave ? null : chave);
   }
 
-  let mensagemVazia = "Aguardando o primeiro ciclo da Jetson";
+  let mensagemVazia = "Aguardando o primeiro ciclo do host";
   if (!carregado) mensagemVazia = "Carregando…";
-  else if (conexao === "offline") mensagemVazia = "Sem conexão com o receptor";
+  else if (conexao === "offline") mensagemVazia = "Sem conexão com o servidor do painel";
+  else if (conexao === "sem-host") mensagemVazia = "Sem conexão com o host (máquina de visão)";
 
   return (
     <div className="app">
@@ -29,8 +30,8 @@ export function App() {
       <main className="conteudo">
         <div className="coluna-principal">
           {/* key: cada detecção selecionada abre o visor de novo na linha de snap */}
-          <VisorFotos key={selecionado?.id_envio ?? "vazio"} ciclo={selecionado} mensagemVazia={mensagemVazia} />
-          <Historico ciclos={ciclos} selecionado={selecionado?.id_envio ?? null} onSelecionar={selecionar} />
+          <VisorFotos key={selecionado?.chave ?? "vazio"} ciclo={selecionado} mensagemVazia={mensagemVazia} />
+          <Historico ciclos={ciclos} selecionado={selecionado?.chave ?? null} onSelecionar={selecionar} />
         </div>
         <DetalhesRegistro ciclo={selecionado} />
       </main>

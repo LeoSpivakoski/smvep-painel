@@ -4,7 +4,7 @@ import { formatarHoraMinuto, formatarMinutos } from "../formatar.ts";
 interface Props {
   ciclos: Ciclo[];
   selecionado: string | null;
-  onSelecionar: (idEnvio: string) => void;
+  onSelecionar: (chave: string) => void;
 }
 
 export function Historico({ ciclos, selecionado, onSelecionar }: Props) {
@@ -21,12 +21,12 @@ export function Historico({ ciclos, selecionado, onSelecionar }: Props) {
             const miniatura = ciclo.fotos.entrada ?? ciclo.fotos.linha;
             const hora = formatarHoraMinuto(ciclo.fim_horario);
             return (
-              <li key={ciclo.id_envio}>
+              <li key={ciclo.chave}>
                 <button
                   type="button"
                   className="cartao"
-                  aria-pressed={ciclo.id_envio === selecionado}
-                  onClick={() => onSelecionar(ciclo.id_envio)}
+                  aria-pressed={ciclo.chave === selecionado}
+                  onClick={() => onSelecionar(ciclo.chave)}
                 >
                   <span className="miniatura">
                     {miniatura ? <img src={miniatura} alt="" loading="lazy" /> : "IMG"}
@@ -34,7 +34,7 @@ export function Historico({ ciclos, selecionado, onSelecionar }: Props) {
                   <span className="cartao-info">
                     <strong className={ciclo.placa ? undefined : "sem-placa"}>{ciclo.placa?.texto ?? "SEM PLACA"}</strong>
                     <span className="cartao-meta">Fim: {hora ?? "—"}</span>
-                    <span className="cartao-duracao">Dur: {formatarMinutos(ciclo.duracao_min)}</span>
+                    <span className="cartao-duracao">Dur: {formatarMinutos(ciclo.duracao_min) ?? "—"}</span>
                   </span>
                 </button>
               </li>

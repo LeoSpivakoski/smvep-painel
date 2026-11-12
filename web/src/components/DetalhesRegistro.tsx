@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
+import { textoSemFotoSaida } from "../../../shared/ciclo.ts";
 import type { Ciclo } from "../../../shared/ciclo.ts";
-import { formatarDecimal, formatarDiaHora, formatarMinutos } from "../formatar.ts";
+import { formatarConfianca, formatarDiaHora, formatarMinutos } from "../formatar.ts";
 import { PlacaMercosul } from "./PlacaMercosul.tsx";
 
 type Tom = "ciano" | "verde" | "ambar" | "vermelho";
@@ -8,6 +9,10 @@ type Tom = "ciano" | "verde" | "ambar" | "vermelho";
 const ENCERRAMENTOS: Record<string, { texto: string; tom: Tom }> = {
   saida: { texto: "SAÍDA", tom: "ambar" },
   veiculo_perdido: { texto: "VEÍCULO PERDIDO", tom: "vermelho" },
+  // O arquivo de vídeo acabou com o veículo na vaga (só nos testes com vídeo).
+  fim_do_video: { texto: "FIM DO VÍDEO", tom: "ciano" },
+  // O processamento do host parou ou caiu com o veículo na vaga.
+  interrompido: { texto: "INTERROMPIDO", tom: "vermelho" },
 };
 
 interface CampoProps {
@@ -38,8 +43,7 @@ function FotoSaida({ ciclo }: { ciclo: Ciclo | null }) {
       </a>
     );
   }
-  let texto = "Foto saída";
-  if (ciclo) texto = ciclo.encerrado_por === "veiculo_perdido" ? "Saída não vista (veículo perdido)" : "Sem foto de saída";
+  const texto = ciclo ? textoSemFotoSaida(ciclo.encerrado_por) : "Foto saída";
   return (
     <div className="foto-saida">
       <span className="vazio">{texto}</span>
@@ -65,8 +69,8 @@ export function DetalhesRegistro({ ciclo }: { ciclo: Ciclo | null }) {
       <PlacaMercosul texto={placa?.texto ?? null} semPlaca={ciclo ? "SEM LEITURA" : "– – –"} />
 
       <dl className="grade">
-        <Campo rotulo="Conf. OCR" valor={formatarDecimal(placa?.confianca_ocr)} tom="verde" />
-        <Campo rotulo="Conf. Det" valor={formatarDecimal(placa?.confianca_deteccao)} tom="verde" />
+        <Campo rotulo="Conf. OCR" valor={formatarConfianca(placa?.confianca_ocr)} tom="verde" />
+        <Campo rotulo="Conf. Det" valor={formatarConfianca(placa?.confianca_deteccao)} tom="verde" />
       </dl>
       <hr className="separador" />
       <dl className="grade">

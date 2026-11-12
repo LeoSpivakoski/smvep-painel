@@ -1,5 +1,10 @@
 node_modules/
 web/dist/
-# Ciclos recebidos da Jetson (fotos e dados.json)
+# Ciclos recebidos do host (fotos e dados.json)
 dados/
 *.log
+
+# Endereço do host salvo pelo INICIAR-PAINEL.cmd (cada máquina tem o seu)
+host.txt
+# Token compartilhado com o host, lido pelo INICIAR-PAINEL.cmd (segredo: nunca no git)
+token.txt

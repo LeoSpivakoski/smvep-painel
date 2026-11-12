@@ -3,6 +3,7 @@
 // como no Figma; o App recria o visor (key) a cada detecção selecionada.
 import { useState } from "react";
 import type { KeyboardEvent } from "react";
+import { textoSemFotoSaida } from "../../../shared/ciclo.ts";
 import type { Ciclo, NomeFoto } from "../../../shared/ciclo.ts";
 
 const FOTOS: readonly { nome: NomeFoto; rotulo: string }[] = [
@@ -14,7 +15,7 @@ const FOTOS: readonly { nome: NomeFoto; rotulo: string }[] = [
 function textoSemFoto(nome: NomeFoto, ciclo: Ciclo): string {
   if (nome === "linha") return "O veículo não tem captura na linha de snap";
   if (nome === "entrada") return "Sem foto de entrada";
-  return ciclo.encerrado_por === "veiculo_perdido" ? "Saída não vista (veículo perdido)" : "Sem foto de saída";
+  return textoSemFotoSaida(ciclo.encerrado_por);
 }
 
 function Seta({ direcao }: { direcao: "anterior" | "proxima" }) {

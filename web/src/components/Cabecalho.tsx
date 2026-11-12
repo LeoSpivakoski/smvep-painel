@@ -5,15 +5,17 @@ import type { Conexao } from "../useCiclos.ts";
 const ROTULOS: Record<Conexao, string> = {
   conectando: "Conectando",
   online: "Online",
+  "sem-host": "Sem host",
   reconectando: "Reconectando",
   offline: "Offline",
 };
 
 const DESCRICOES: Record<Conexao, string> = {
-  conectando: "Conectando ao receptor",
-  online: "Recebendo os ciclos em tempo real",
-  reconectando: "Conexão com o receptor perdida; tentando de novo",
-  offline: "Sem conexão com o receptor",
+  conectando: "Conectando ao servidor do painel",
+  online: "Recebendo os ciclos do host em tempo real",
+  "sem-host": "O painel está no ar, mas sem conexão com o host (máquina de visão); tentando de novo a cada 2 s",
+  reconectando: "Conexão com o servidor do painel perdida; tentando de novo",
+  offline: "Sem conexão com o servidor do painel",
 };
 
 function useRelogio(): Date {

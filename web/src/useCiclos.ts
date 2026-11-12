@@ -1,19 +1,23 @@
-// Carrega os ciclos do receptor e acompanha os novos por Server-Sent Events.
+// Carrega os ciclos do servidor do painel e acompanha os novos por Server-Sent Events.
 import { useEffect, useState } from "react";
 import { mesclarCiclos } from "../../shared/ciclo.ts";
 import type { Ciclo, RespostaLista } from "../../shared/ciclo.ts";
 
-/** Estado da ligação entre a tela e o receptor (a Jetson não manda sinal de vida, só ciclos). */
-export type Conexao = "conectando" | "online" | "reconectando" | "offline";
+/**
+ * Estado da tela: a ligação com o servidor do painel e, através dele, com o host.
+ * `sem-host`: o painel está no ar, mas a conexão com a máquina de visão caiu.
+ */
+export type Conexao = "conectando" | "online" | "sem-host" | "reconectando" | "offline";
 
 const FALHAS_ATE_OFFLINE = 3;
 const ESPERA_MAXIMA_MS = 10_000;
-/** O receptor manda `ping` a cada 10 s; 25 s de silêncio = conexão morta sem aviso. */
+/** O servidor manda `ping` a cada 10 s; 25 s de silêncio = conexão morta sem aviso. */
 const SILENCIO_MAXIMO_MS = 25_000;
 
 export function useCiclos(limite: number) {
   const [ciclos, setCiclos] = useState<Ciclo[]>([]);
   const [conexao, setConexao] = useState<Conexao>("conectando");
+  const [hostConectado, setHostConectado] = useState<boolean | null>(null);
   const [carregado, setCarregado] = useState(false);
 
   useEffect(() => {
@@ -32,7 +36,7 @@ export function useCiclos(limite: number) {
         const dados = (await resposta.json()) as RespostaLista;
         if (ativo) setCiclos((atuais) => mesclarCiclos(atuais, dados.ciclos, limite));
       } catch {
-        // Sem receptor: o estado da conexão já mostra; a reconexão carrega de novo.
+        // Sem servidor: o estado da conexão já mostra; a reconexão carrega de novo.
       } finally {
         if (ativo) setCarregado(true);
       }
@@ -61,11 +65,19 @@ export function useCiclos(limite: number) {
         setCiclos((atuais) => mesclarCiclos(atuais, [ciclo], limite));
       });
 
+      // O servidor avisa ao abrir e sempre que a conexão com o host muda.
+      fonte.addEventListener("host", (evento) => {
+        ultimoSinal = Date.now();
+        const { conectado } = JSON.parse((evento as MessageEvent<string>).data) as { conectado: boolean };
+        setHostConectado(conectado);
+      });
+
       fonte.onerror = () => {
         falhas += 1;
+        setHostConectado(null);
         setConexao(falhas >= FALHAS_ATE_OFFLINE ? "offline" : "reconectando");
         // CLOSED: o navegador desistiu (por exemplo, o proxy do Vite respondeu
-        // 500 com o receptor parado). Nesse caso a tela reabre por conta própria.
+        // 500 com o servidor parado). Nesse caso a tela reabre por conta própria.
         if (fonte?.readyState === EventSource.CLOSED) {
           fonte.close();
           espera = setTimeout(conectar, Math.min(ESPERA_MAXIMA_MS, 1_000 * 2 ** falhas));
@@ -94,5 +106,5 @@ export function useCiclos(limite: number) {
     };
   }, [limite]);
 
-  return { ciclos, conexao, carregado };
+  return { ciclos, conexao: conexao === "online" && hostConectado === false ? "sem-host" : conexao, carregado };
 }

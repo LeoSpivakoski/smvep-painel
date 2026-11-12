@@ -7,6 +7,14 @@ export function formatarDecimal(valor: number | null | undefined): string | null
   return valor == null ? null : decimal.format(valor);
 }
 
+/** Confiança nunca chega a 1: no máximo `0,99` (ciclos antigos guardaram 1,0 arredondado). */
+export const CONFIANCA_MAXIMA = 0.99;
+
+/** `0.98` → `0,98`; `1` → `0,99`; ausente → `null`. */
+export function formatarConfianca(valor: number | null | undefined): string | null {
+  return valor == null ? null : decimal.format(Math.min(valor, CONFIANCA_MAXIMA));
+}
+
 /** `2.04` → `2,04 min`. */
 export function formatarMinutos(valor: number | null | undefined): string | null {
   const numero = formatarDecimal(valor);
