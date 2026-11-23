@@ -11,7 +11,7 @@
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { criarServidor } from "./app.ts";
+import { criarServidor, ROTA_DOCS } from "./app.ts";
 import { conectarAoHost, enderecosDoHost } from "./conexaoHost.ts";
 
 const raizProjeto = path.resolve(import.meta.dirname, "..");
@@ -92,6 +92,7 @@ async function iniciar(host: { http: string; ws: string } | null): Promise<void>
   const locais = interfaceRede === "0.0.0.0" ? enderecosLocais() : [interfaceRede];
   console.log("[PAINEL] No app, use o endereço deste painel (o app envia POST /eventos):");
   for (const ip of locais.length ? locais : ["localhost"]) console.log(`         http://${ip}:${porta}`);
+  console.log(`[PAINEL] Documentação da API (Swagger): ${tela}${ROTA_DOCS}`);
   console.log(
     token
       ? "[PAINEL] Token configurado: o app precisa enviar Authorization: Bearer <token>."

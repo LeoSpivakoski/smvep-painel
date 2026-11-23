@@ -12,7 +12,9 @@ O QUE ESTÁ NO PEN DRIVE
     INICIAR-PAINEL.cmd          inicia o painel com dois cliques (Windows)
     PASSO-A-PASSO.txt           este arquivo
     README.md                   documentação técnica (contrato completo do
-                                POST /eventos, com todas as respostas)
+                                POST /eventos, com todas as respostas); a
+                                documentação Swagger fica no próprio painel,
+                                em http://<IP-DO-PAINEL>:8080/docs
     exemplos\                   ciclos gravados, para ver a tela sem o app
     node_modules\, web\dist\    dependências e tela já compiladas: não precisa
                                 de internet para rodar
@@ -202,7 +204,20 @@ COMO FUNCIONA
                       a foto); a mensagem em error.message diz o que corrigir
      5xx / sem resposta   não foi gravado: tente de novo mais tarde
 
-   O formato completo do evento está no README.md, em "Envio pelo app".
+5) Documentação da API (Swagger), em qualquer navegador da rede:
+
+       http://<IP-DO-PAINEL>:8080/docs
+
+   Lá estão todas as rotas, o formato de cada campo do evento e as
+   respostas. Em POST /eventos, "Try it out" já vem com um OCCUPIED e um
+   VACATED de exemplo: "Execute" envia de verdade, e o registro de exemplo
+   (EMB-001, ocupação exemplo-70) aparece na tela. Se o painel tem senha,
+   clique antes em "Authorize" e cole o token. Funciona sem internet.
+   O mesmo conteúdo, para importar em outras ferramentas (OpenAPI 3.0):
+
+       http://<IP-DO-PAINEL>:8080/docs/json
+
+   O formato também está no README.md, em "Envio pelo app".
 
 
 ===============================================================================
@@ -319,7 +334,7 @@ comandos no Prompt de Comando (cmd).
 
   O app recebe 422 / "INVALID_MESSAGE"
       Um campo está fora do formato; error.message diz qual (por exemplo,
-      "messageType: ..."). Veja o formato no README.md.
+      "messageType: ..."). Veja o formato em http://<IP-DO-PAINEL>:8080/docs.
 
   O app recebe 413
       O evento passou de 50 MB. Cada foto inteira tem perto de 2 MB.

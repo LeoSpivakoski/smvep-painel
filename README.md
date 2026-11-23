@@ -74,6 +74,13 @@ a conexão com o host é o painel, então lá a porta liberada é a 8000 do host
 
 ## Envio pelo app (POST /eventos)
 
+**Documentação Swagger:** `http://<IP-DO-PAINEL>:8080/docs` (a especificação
+OpenAPI 3.0 fica em `/docs/json`). Ela descreve todas as rotas, com os dois
+exemplos (OCCUPIED e VACATED) prontos no "Try it out"; com senha, clique em
+"Authorize" e cole o token. O corpo do `POST /eventos` sai do mesmo esquema zod
+que valida os eventos (`shared/evento.ts`), então a documentação acompanha a
+validação. Funciona sem internet.
+
 Um evento por mudança da vaga, no formato dos exemplos de
 `exemplos_json_integracao_ifsc_spark/` (01 e 03 são pedidos; 02 e 04, respostas):
 
@@ -200,7 +207,7 @@ npm run verificar
 `npm test` cobre a gravação e a validação dos ciclos, repetições, revisões, os
 quatro motivos de fim, a leitura, o SSE, o `POST /eventos` (OCCUPIED e VACATED
 em qualquer ordem, caixas, DUPLICATE, integridade das fotos, token, CORS, corpo
-grande) e a conexão WebSocket com um host falso (ola, confirmação, recusa,
+grande), a documentação Swagger (os exemplos dela são aceitos) e a conexão WebSocket com um host falso (ola, confirmação, recusa,
 reconexão, vigia de silêncio). `npm run verificar` confere os tipos da tela e
 do servidor.
 
@@ -213,6 +220,7 @@ do servidor.
 | `GET /api/eventos` | Server-Sent Events: `ciclo` a cada ciclo novo ou atualizado por uma revisão, `host` (`{"conectado": true}`; `null` sem host configurado) ao abrir e quando a conexão com o host muda, e `ping` a cada 10 s. |
 | `GET /api/status` | Ciclos gravados, telas conectadas, endereço do host e `host_conectado`. |
 | `GET /fotos/<pasta>/<linha\|entrada\|saida>.jpg` | Fotos. |
+| `GET /docs` | Documentação Swagger da API (OpenAPI em `/docs/json`). |
 
 A pílula do cabeçalho mostra ONLINE (pronto para receber), SEM HOST (só com
 `SMVEP_HOST`: o painel está no ar, mas sem conexão com a máquina de visão), RECONECTANDO ou OFFLINE
@@ -228,6 +236,7 @@ shared/ciclo.ts          tipos e ordenação usados pelo servidor e pela tela
 server/eventos.ts        OCCUPIED/VACATED → ciclo, integridade das fotos e respostas ao app
 server/conexaoHost.ts    cliente WebSocket da API do host (ola, confirmação, reconexão)
 server/app.ts            gravação dos ciclos recebidos e rotas para a tela
+server/openapi.ts        documentação OpenAPI (Swagger em /docs)
 server/armazenamento.ts  pastas dos ciclos e índice em memória
 server/index.ts          inicialização e variáveis de ambiente
 web/src/                 tela React (App, components/, useCiclos, formatar, tema.css);

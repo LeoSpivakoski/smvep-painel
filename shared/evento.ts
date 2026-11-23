@@ -5,79 +5,115 @@
 // Só o servidor do painel importa este arquivo.
 import { z } from "zod";
 
+// As descrições (`.meta`) também vão para a documentação Swagger (server/openapi.ts).
+const descrito = <T extends z.ZodType>(esquema: T, description: string): T => esquema.meta({ description });
+
 /** Retângulo em pixels da foto inteira (origem no canto superior esquerdo). */
-export const esquemaCaixa = z
-  .object({
-    xMin: z.number().min(0),
-    yMin: z.number().min(0),
-    xMax: z.number().min(0),
-    yMax: z.number().min(0),
-  })
-  .refine((caixa) => caixa.xMax > caixa.xMin && caixa.yMax > caixa.yMin, "xMax/yMax precisam ser maiores que xMin/yMin");
+export const esquemaCaixa = descrito(
+  z
+    .object({
+      xMin: z.number().min(0),
+      yMin: z.number().min(0),
+      xMax: z.number().min(0),
+      yMax: z.number().min(0),
+    })
+    .refine((caixa) => caixa.xMax > caixa.xMin && caixa.yMax > caixa.yMin, "xMax/yMax precisam ser maiores que xMin/yMin"),
+  "Retângulo em pixels da foto inteira (origem no canto superior esquerdo); xMax > xMin e yMax > yMin.",
+);
 
 const textoOpcional = z.string().nullable().optional();
 
 export const esquemaImagem = z.looseObject({
   imageId: z.union([z.string(), z.number()]).transform(String).optional(),
-  /** PLATE_CROSSING (veículo cruzando a linha) ou SPACE_OVERVIEW (vista da vaga). */
-  purpose: z.string().min(1),
+  purpose: descrito(
+    z.string().min(1),
+    "PLATE_CROSSING (veículo cruzando a linha de snap) ou SPACE_OVERVIEW (vista da vaga: entrada no OCCUPIED, saída no VACATED). Outras finalidades são aceitas, mas não aparecem na tela.",
+  ),
   capturedAt: textoOpcional,
   mimeType: z.literal("image/jpeg"),
   encoding: z.literal("base64"),
-  byteLength: z.number().int().min(1).optional(),
-  sha256: z
-    .string()
-    .regex(/^[0-9a-fA-F]{64}$/, "sha256 precisa ter 64 dígitos hexadecimais")
-    .optional(),
-  base64: z
-    .string()
-    .min(4)
-    .regex(/^[A-Za-z0-9+/]+={0,2}$/, "foto não está em base64"),
+  byteLength: descrito(
+    z.number().int().min(1).optional(),
+    "Tamanho da foto decodificada, em bytes; se vier, precisa conferir (senão: 422 IMAGE_INTEGRITY).",
+  ),
+  sha256: descrito(
+    z
+      .string()
+      .regex(/^[0-9a-fA-F]{64}$/, "sha256 precisa ter 64 dígitos hexadecimais")
+      .optional(),
+    "SHA-256 da foto decodificada, em hexadecimal; se vier, precisa conferir (senão: 422 IMAGE_INTEGRITY).",
+  ),
+  base64: descrito(
+    z
+      .string()
+      .min(4)
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/, "foto não está em base64"),
+    "A foto JPEG inteira, em base64 padrão, sem quebras de linha.",
+  ),
 });
 
 export const esquemaEvento = z.looseObject({
-  schemaVersion: z.string().min(1),
-  messageId: z.string().min(1).max(200),
-  messageType: z.enum(["OCCUPIED", "VACATED"]),
+  schemaVersion: descrito(z.string().min(1), "Versão do contrato; o painel aceita 1.x."),
+  messageId: descrito(
+    z.string().min(1).max(200),
+    "Identifica o evento. Repetido (mesmo deviceId), o painel responde DUPLICATE sem gravar de novo.",
+  ),
+  messageType: descrito(z.enum(["OCCUPIED", "VACATED"]), "OCCUPIED: o veículo parou na vaga. VACATED: o veículo saiu."),
   deviceId: z.string().min(1).max(100),
   installationId: textoOpcional,
   configVersion: z.number().nullable().optional(),
   bootId: textoOpcional,
   sequence: z.number().nullable().optional(),
-  occurredAt: z.string().refine((texto) => !Number.isNaN(Date.parse(texto)), "occurredAt não é uma data ISO 8601"),
+  occurredAt: descrito(
+    z.string().refine((texto) => !Number.isNaN(Date.parse(texto)), "occurredAt não é uma data ISO 8601"),
+    "Quando aconteceu (ISO 8601): início da parada no OCCUPIED, fim no VACATED.",
+  ),
   timeQuality: textoOpcional,
   cameraId: textoOpcional,
-  spaceId: textoOpcional,
-  occupancyId: z
-    .union([z.string().min(1).max(100), z.number()])
-    .transform(String),
-  /** Só o OCCUPIED traz a placa; no VACATED o painel a ignora. */
-  plate: z
-    .looseObject({
-      /** READ quando a placa foi lida; NOT_VISIBLE e outros, sem leitura. */
-      status: z.string().min(1),
-      value: z.string().min(1).max(16).nullable().optional(),
-      /** Confiança da leitura dos caracteres (OCR). */
-      plateConfidence: z.number().min(0).max(1).nullable().optional(),
-      /** Confiança da detecção da placa na foto. */
-      plateDetectionConfidence: z.number().min(0).max(1).nullable().optional(),
-      /** Nome antigo da confiança do OCR (exemplo genérico 01); vale se faltar `plateConfidence`. */
-      confidence: z.number().min(0).max(1).nullable().optional(),
-      boundingBox: esquemaCaixa.nullable().optional(),
-    })
-    .nullable()
-    .optional(),
+  spaceId: descrito(textoOpcional, "Vaga."),
+  occupancyId: descrito(
+    z.union([z.string().min(1).max(100), z.number()]).transform(String),
+    "Junta o OCCUPIED e o VACATED da mesma parada: o registro do painel é deviceId:occupancyId.",
+  ),
+  plate: descrito(
+    z
+      .looseObject({
+        status: descrito(z.string().min(1), "READ quando a placa foi lida; NOT_VISIBLE e outros, sem leitura."),
+        value: z.string().min(1).max(16).nullable().optional(),
+        plateConfidence: descrito(
+          z.number().min(0).max(1).nullable().optional(),
+          "Confiança da leitura dos caracteres (OCR): Conf. OCR na tela.",
+        ),
+        plateDetectionConfidence: descrito(
+          z.number().min(0).max(1).nullable().optional(),
+          "Confiança da detecção da placa na foto: Conf. Det na tela.",
+        ),
+        confidence: descrito(
+          z.number().min(0).max(1).nullable().optional(),
+          "Nome antigo da confiança do OCR; vale se faltar plateConfidence.",
+        ),
+        boundingBox: descrito(esquemaCaixa.nullable().optional(), "Caixa da placa na foto PLATE_CROSSING."),
+      })
+      .nullable()
+      .optional(),
+    "Só no OCCUPIED. Uma placa no VACATED é ignorada.",
+  ),
   vehicle: z
     .looseObject({
       detected: z.boolean().optional(),
-      boundingBox: esquemaCaixa.nullable().optional(),
+      boundingBox: descrito(
+        esquemaCaixa.nullable().optional(),
+        "Caixa do veículo: na foto PLATE_CROSSING (OCCUPIED) ou na SPACE_OVERVIEW de saída (VACATED).",
+      ),
     })
     .nullable()
     .optional(),
-  /** Só no VACATED: DEPARTURE_OBSERVED, VEHICLE_LOST, END_OF_VIDEO, INTERRUPTED. */
-  closureReason: textoOpcional,
+  closureReason: descrito(
+    textoOpcional,
+    "Só no VACATED: DEPARTURE_OBSERVED, VEHICLE_LOST, END_OF_VIDEO ou INTERRUPTED (outros valores aparecem como vieram).",
+  ),
   evidenceStatus: textoOpcional,
-  images: z.array(esquemaImagem).max(10).default([]),
+  images: descrito(z.array(esquemaImagem).max(10).default([]), "Fotos inteiras do evento (até 10)."),
 });
 
 export type EventoRecebido = z.infer<typeof esquemaEvento>;

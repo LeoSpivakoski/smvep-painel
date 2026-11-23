@@ -955,3 +955,53 @@ describe("eventos empurrados pelo app (POST /eventos)", () => {
     assert.equal(status.host_conectado, null);
   });
 });
+
+describe("documentação Swagger (/docs)", () => {
+  async function especificacao() {
+    servidor = await criarServidor({ pastaDados, log: () => {} });
+    const resposta = await painel().app.inject({ url: "/docs/json" });
+    assert.equal(resposta.statusCode, 200);
+    return resposta.json();
+  }
+
+  it("serve a tela do Swagger", async () => {
+    servidor = await criarServidor({ pastaDados, log: () => {} });
+    const resposta = await painel().app.inject({ url: "/docs/" });
+    assert.equal(resposta.statusCode, 200);
+    assert.match(resposta.headers["content-type"] as string, /text\/html/);
+    assert.match(resposta.body, /swagger/i);
+  });
+
+  it("descreve o POST /eventos com o esquema que valida os eventos", async () => {
+    const doc = await especificacao();
+    assert.equal(doc.openapi, "3.0.3");
+    const post = doc.paths["/eventos"].post;
+    assert.deepEqual(Object.keys(post.responses).sort(), ["200", "400", "401", "413", "422", "500"]);
+    assert.deepEqual(post.security, [{ token: [] }, {}]);
+    const evento = doc.components.schemas.Evento;
+    assert.deepEqual(evento.properties.messageType.enum, ["OCCUPIED", "VACATED"]);
+    assert.match(evento.properties.plate.description, /Só no OCCUPIED/);
+    assert.ok(evento.required.includes("occupancyId"));
+    for (const rota of ["/api/ciclos", "/api/ciclos/{chave}", "/api/eventos", "/api/status", "/fotos/{pasta}/{arquivo}"]) {
+      assert.ok(doc.paths[rota]?.get, `falta ${rota} na documentação`);
+    }
+  });
+
+  it("os exemplos do Swagger são aceitos pelo POST /eventos", async () => {
+    const doc = await especificacao();
+    const exemplos = doc.paths["/eventos"].post.requestBody.content["application/json"].examples;
+    for (const nome of ["OCCUPIED", "VACATED"]) {
+      const resposta = await painel().app.inject({
+        method: "POST",
+        url: "/eventos",
+        headers: { "content-type": "application/json" },
+        payload: JSON.stringify(exemplos[nome].value),
+      });
+      assert.equal(resposta.statusCode, 200, resposta.body);
+      assert.equal(resposta.json().result, "ACCEPTED");
+    }
+    const ciclo = (await painel().app.inject({ url: "/api/ciclos/EMB-001:exemplo-70" })).json();
+    assert.equal(ciclo.situacao, "encerrada");
+    assert.deepEqual(ciclo.dimensoes.linha, { largura: 2688, altura: 1520 });
+  });
+});

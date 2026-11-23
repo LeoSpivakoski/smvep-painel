@@ -10,18 +10,22 @@
 //                            (revisão maior), `host` quando a conexão com o host muda,
 //                            `ping` a cada 10 s
 //   GET  /api/status         saúde do painel e da conexão com o host
+//   GET  /docs               documentação Swagger (OpenAPI em /docs/json, openapi.ts)
 //   GET  /fotos/...          fotos dos ciclos
 //   GET  /                   tela (build de web/dist), quando existe
 import { timingSafeEqual } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import type { ServerResponse } from "node:http";
 import fastifyStatic from "@fastify/static";
+import fastifySwagger from "@fastify/swagger";
+import fastifySwaggerUi from "@fastify/swagger-ui";
 import Fastify from "fastify";
 import type { Ciclo, RespostaLista } from "../shared/ciclo.ts";
 import { descreverErros, esquemaCiclo, revisaoDoCiclo } from "../shared/esquema.ts";
 import { Armazenamento, PREFIXO_FOTOS } from "./armazenamento.ts";
 import { processarEvento, recusa } from "./eventos.ts";
 import type { ResultadoEvento } from "./eventos.ts";
+import { documentoOpenApi } from "./openapi.ts";
 
 /** A tela reabre a conexão depois de 2,5 intervalos sem nenhum evento (web/src/useCiclos.ts). */
 export const INTERVALO_PING_MS = 10_000;
@@ -56,6 +60,11 @@ function tokenConfere(cabecalho: string | undefined, token: string): boolean {
 }
 
 export const ROTA_EVENTOS = "/eventos";
+
+const VERSAO_PAINEL: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+
+/** Documentação Swagger da API (a especificação OpenAPI fica em /docs/json). */
+export const ROTA_DOCS = "/docs";
 
 const CABECALHOS_CORS = {
   "access-control-allow-origin": "*",
@@ -98,6 +107,23 @@ export async function criarServidor(opcoes: OpcoesServidor) {
   // para qualquer uma (também nas respostas de erro).
   app.addHook("onRequest", async (requisicao, resposta) => {
     if (requisicao.url.split("?")[0] === ROTA_EVENTOS) void resposta.headers(CABECALHOS_CORS);
+  });
+
+  // Swagger: tudo vem do pacote (funciona sem internet). O `documentoOpenApi`
+  // descreve as rotas abaixo; o corpo do POST /eventos sai do esquema zod.
+  await app.register(fastifySwagger, {
+    mode: "static",
+    specification: {
+      document: documentoOpenApi({
+        versao: VERSAO_PAINEL,
+        rotaEventos: ROTA_EVENTOS,
+        limiteCorpoMb: LIMITE_CORPO / (1024 * 1024),
+      }) as never,
+    },
+  });
+  await app.register(fastifySwaggerUi, {
+    routePrefix: ROTA_DOCS,
+    uiConfig: { docExpansion: "list", deepLinking: true, tryItOutEnabled: true },
   });
 
   app.setNotFoundHandler((requisicao, resposta) => {
