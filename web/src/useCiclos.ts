@@ -68,7 +68,8 @@ export function useCiclos(limite: number) {
       // O servidor avisa ao abrir e sempre que a conexão com o host muda.
       fonte.addEventListener("host", (evento) => {
         ultimoSinal = Date.now();
-        const { conectado } = JSON.parse((evento as MessageEvent<string>).data) as { conectado: boolean };
+        // `null`: o painel não tem host configurado; os ciclos chegam pelo POST /eventos.
+        const { conectado } = JSON.parse((evento as MessageEvent<string>).data) as { conectado: boolean | null };
         setHostConectado(conectado);
       });
 

@@ -5,6 +5,26 @@ import { useState } from "react";
 import type { KeyboardEvent } from "react";
 import { textoSemFotoSaida } from "../../../shared/ciclo.ts";
 import type { Ciclo, NomeFoto } from "../../../shared/ciclo.ts";
+import { FotoComCaixas } from "./FotoComCaixas.tsx";
+
+// Escolha de mostrar as caixas: vale para todas as fotos e fica guardada no navegador.
+const PREFERENCIA_CAIXAS = "smvep.mostrarCaixas";
+
+function lerPreferenciaCaixas(): boolean {
+  try {
+    return localStorage.getItem(PREFERENCIA_CAIXAS) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function gravarPreferenciaCaixas(mostrar: boolean): void {
+  try {
+    localStorage.setItem(PREFERENCIA_CAIXAS, mostrar ? "1" : "0");
+  } catch {
+    // sem armazenamento (janela privada): vale só até recarregar
+  }
+}
 
 const FOTOS: readonly { nome: NomeFoto; rotulo: string }[] = [
   { nome: "linha", rotulo: "Linha de snap" },
@@ -41,9 +61,19 @@ interface Props {
 
 export function VisorFotos({ ciclo, mensagemVazia }: Props) {
   const [indice, setIndice] = useState(0);
+  const [mostrarCaixas, setMostrarCaixas] = useState(lerPreferenciaCaixas);
   const atual = FOTOS[indice] ?? FOTOS[0]!;
   const url = ciclo?.fotos[atual.nome] ?? null;
   const placa = ciclo?.placa?.texto ?? "sem placa";
+  const caixas = ciclo?.caixas?.[atual.nome];
+  const temCaixas = Boolean(url && caixas && caixas.length > 0 && ciclo?.dimensoes?.[atual.nome]);
+
+  function alternarCaixas() {
+    setMostrarCaixas((mostrar) => {
+      gravarPreferenciaCaixas(!mostrar);
+      return !mostrar;
+    });
+  }
 
   const vizinha = (passo: number) => FOTOS[(indice + passo + FOTOS.length) % FOTOS.length]!;
   const passar = (passo: number) => setIndice((i) => (i + passo + FOTOS.length) % FOTOS.length);
@@ -59,12 +89,39 @@ export function VisorFotos({ ciclo, mensagemVazia }: Props) {
   return (
     <section className="painel visor" aria-label="Fotos do veículo" onKeyDown={ciclo ? aoTeclar : undefined}>
       <span className="etiqueta">{atual.rotulo}</span>
-      {ciclo && <span className="origem">{ciclo.dispositivo}</span>}
+      {/* Na faixa acima da foto: nunca cobre a imagem, qualquer que seja o tamanho dela. */}
+      {ciclo && (
+        <div className="visor-topo">
+          {temCaixas && (
+            <button
+              type="button"
+              className="visor-caixas"
+              aria-pressed={mostrarCaixas}
+              onClick={alternarCaixas}
+              title={mostrarCaixas ? "Ocultar as caixas de veículo e placa" : "Mostrar as caixas de veículo e placa"}
+            >
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <rect x="2" y="3" width="12" height="10" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                <rect x="5.5" y="8" width="5" height="2.6" rx="0.6" fill="currentColor" />
+              </svg>
+              Caixas
+            </button>
+          )}
+          <span className="origem">{ciclo.dispositivo}</span>
+        </div>
+      )}
 
       {!ciclo && <p className="vazio">{mensagemVazia}</p>}
       {ciclo && url && (
         <a className="visor-foto" href={url} target="_blank" rel="noreferrer" title="Abrir a foto em tamanho real">
-          <img key={url} src={url} alt={`${atual.rotulo}: veículo ${placa}`} />
+          <FotoComCaixas
+            url={url}
+            alt={`${atual.rotulo}: veículo ${placa}`}
+            caixas={caixas}
+            dimensoes={ciclo.dimensoes?.[atual.nome]}
+            mostrarCaixas={mostrarCaixas}
+            placa={ciclo.placa?.texto ?? null}
+          />
         </a>
       )}
       {ciclo && !url && <p className="vazio">{textoSemFoto(atual.nome, ciclo)}</p>}

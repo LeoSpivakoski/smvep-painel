@@ -1,5 +1,6 @@
 // node --test server/app.test.ts
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -549,5 +550,408 @@ describe("endereço do host", () => {
       ws: "wss://smvep.exemplo.com/ws/ciclos",
     });
     assert.throws(() => enderecosDoHost("ftp://192.168.0.10"), /esquema/);
+  });
+});
+
+describe("eventos empurrados pelo app (POST /eventos)", () => {
+  // JPEG mínimo com o marcador SOF0 de uma foto 2688×1520 (o painel lê o tamanho dele).
+  const FOTO_INTEIRA = Buffer.from([
+    0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x05, 0xf0, 0x0a, 0x80, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03,
+    0x11, 0x01, 0xff, 0xd9,
+  ]);
+  const FOTO_SAIDA = Buffer.concat([FOTO_INTEIRA.subarray(0, -2), Buffer.from([0x00, 0xff, 0xd9])]);
+
+  function imagem(purpose: string, bytes: Buffer, alterar: Record<string, unknown> = {}) {
+    return {
+      imageId: `img-${purpose}`,
+      purpose,
+      capturedAt: "2026-09-21T13:54:54.986-03:00",
+      mimeType: "image/jpeg",
+      encoding: "base64",
+      byteLength: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      base64: bytes.toString("base64"),
+      ...alterar,
+    };
+  }
+
+  function ocupado(alterar: Record<string, unknown> = {}) {
+    return {
+      schemaVersion: "1.0",
+      messageId: "evt-0001",
+      messageType: "OCCUPIED",
+      deviceId: "EMB-001",
+      installationId: "PONTO-001",
+      configVersion: 1,
+      bootId: "boot-7721",
+      sequence: 104,
+      occurredAt: "2026-09-21T13:54:54.986-03:00",
+      timeQuality: "SYNCED",
+      cameraId: "CAM-001",
+      spaceId: "BAY-01",
+      occupancyId: "70",
+      plate: {
+        status: "READ",
+        value: "QRP7J32",
+        plateConfidence: 0.99,
+        plateDetectionConfidence: 0.98,
+        boundingBox: { xMin: 1973, yMin: 907, xMax: 2085, yMax: 953 },
+      },
+      vehicle: { detected: true, boundingBox: { xMin: 1569, yMin: 615, xMax: 2234, yMax: 1153 } },
+      evidenceStatus: "AVAILABLE",
+      images: [imagem("PLATE_CROSSING", FOTO_INTEIRA), imagem("SPACE_OVERVIEW", FOTO_INTEIRA)],
+      ...alterar,
+    };
+  }
+
+  function liberado(alterar: Record<string, unknown> = {}) {
+    return {
+      schemaVersion: "1.0",
+      messageId: "evt-0002",
+      messageType: "VACATED",
+      deviceId: "EMB-001",
+      sequence: 105,
+      occurredAt: "2026-09-21T13:56:56.540-03:00",
+      cameraId: "CAM-001",
+      spaceId: "BAY-01",
+      occupancyId: "70",
+      vehicle: { detected: true, boundingBox: { xMin: 970, yMin: 523, xMax: 1867, yMax: 1001 } },
+      closureReason: "DEPARTURE_OBSERVED",
+      evidenceStatus: "AVAILABLE",
+      images: [imagem("SPACE_OVERVIEW", FOTO_SAIDA)],
+      ...alterar,
+    };
+  }
+
+  const CHAVE_OCUPACAO = "EMB-001:70";
+  const PASTA_OCUPACAO = "EMB-001_70";
+
+  async function iniciarSemHost(token: string | null = null) {
+    servidor = await criarServidor({ pastaDados, token, log: () => {} });
+    return servidor;
+  }
+
+  async function enviar(corpo: unknown, cabecalhos: Record<string, string> = {}) {
+    return painel().app.inject({
+      method: "POST",
+      url: "/eventos",
+      headers: { "content-type": "application/json", ...cabecalhos },
+      payload: typeof corpo === "string" ? corpo : JSON.stringify(corpo),
+    });
+  }
+
+  async function cicloDaOcupacao(): Promise<Ciclo> {
+    const resposta = await painel().app.inject({ url: `/api/ciclos/${encodeURIComponent(CHAVE_OCUPACAO)}` });
+    assert.equal(resposta.statusCode, 200);
+    return resposta.json();
+  }
+
+  it("OCCUPIED: responde ACCEPTED e o veículo aparece na vaga, com as caixas na foto da linha", async () => {
+    await iniciarSemHost();
+    const resposta = await enviar(ocupado());
+    assert.equal(resposta.statusCode, 200);
+    const corpo = resposta.json();
+    assert.deepEqual(
+      { ...corpo, receivedAt: typeof corpo.receivedAt },
+      {
+        schemaVersion: "1.0",
+        messageId: "evt-0001",
+        messageType: "OCCUPIED",
+        deviceId: "EMB-001",
+        result: "ACCEPTED",
+        receiptId: "rcpt-evt-0001",
+        receivedAt: "string",
+        durable: true,
+      },
+    );
+    assert.ok(!Number.isNaN(Date.parse(corpo.receivedAt)));
+
+    const ciclo = await cicloDaOcupacao();
+    assert.equal(ciclo.situacao, "ocupada");
+    assert.equal(ciclo.encerrado_por, null);
+    assert.equal(ciclo.inicio_horario, "2026-09-21T13:54:54.986-03:00");
+    assert.equal(ciclo.fim_horario, null);
+    assert.equal(ciclo.duracao_min, null);
+    assert.equal(ciclo.id, 70);
+    assert.equal(ciclo.vaga, "BAY-01");
+    assert.deepEqual(ciclo.placa, {
+      texto: "QRP7J32",
+      confianca_ocr: 0.99,
+      confianca_deteccao: 0.98,
+      leitura_horario: "2026-09-21T13:54:54.986-03:00",
+    });
+    assert.deepEqual(ciclo.fotos, {
+      linha: `/fotos/${PASTA_OCUPACAO}/linha.jpg`,
+      entrada: `/fotos/${PASTA_OCUPACAO}/entrada.jpg`,
+      saida: null,
+    });
+    assert.deepEqual(ciclo.caixas, {
+      linha: [
+        { tipo: "veiculo", xMin: 1569, yMin: 615, xMax: 2234, yMax: 1153 },
+        { tipo: "placa", xMin: 1973, yMin: 907, xMax: 2085, yMax: 953 },
+      ],
+    });
+    assert.deepEqual(ciclo.dimensoes, {
+      linha: { largura: 2688, altura: 1520 },
+      entrada: { largura: 2688, altura: 1520 },
+    });
+    assert.deepEqual(await readFile(path.join(pastaDados, PASTA_OCUPACAO, "linha.jpg")), FOTO_INTEIRA);
+  });
+
+  it("VACATED: completa o mesmo ciclo, com duração, motivo, foto e caixa de saída", async () => {
+    await iniciarSemHost();
+    await enviar(ocupado());
+    const resposta = await enviar(liberado());
+    assert.equal(resposta.statusCode, 200);
+    assert.equal(resposta.json().result, "ACCEPTED");
+    assert.equal(resposta.json().receiptId, "rcpt-evt-0002");
+
+    const ciclo = await cicloDaOcupacao();
+    assert.equal(ciclo.situacao, "encerrada");
+    assert.equal(ciclo.encerrado_por, "saida");
+    assert.equal(ciclo.fim_horario, "2026-09-21T13:56:56.540-03:00");
+    assert.equal(ciclo.duracao_min, 2.03);
+    // A placa lida na entrada continua (na saída ela não estava visível).
+    assert.equal(ciclo.placa?.texto, "QRP7J32");
+    assert.ok(ciclo.fotos.linha && ciclo.fotos.entrada && ciclo.fotos.saida);
+    assert.deepEqual(ciclo.caixas?.saida, [{ tipo: "veiculo", xMin: 970, yMin: 523, xMax: 1867, yMax: 1001 }]);
+    assert.equal(ciclo.caixas?.linha?.length, 2);
+    assert.deepEqual(await readFile(path.join(pastaDados, PASTA_OCUPACAO, "saida.jpg")), FOTO_SAIDA);
+    assert.deepEqual(await readFile(path.join(pastaDados, PASTA_OCUPACAO, "linha.jpg")), FOTO_INTEIRA);
+    assert.equal((await listar()).total, 1);
+  });
+
+  it("VACATED antes do OCCUPIED: os dois são aceitos e o ciclo fica completo e encerrado", async () => {
+    await iniciarSemHost();
+    assert.equal((await enviar(liberado())).json().result, "ACCEPTED");
+    let ciclo = await cicloDaOcupacao();
+    assert.equal(ciclo.situacao, "encerrada");
+    assert.equal(ciclo.inicio_horario, null);
+
+    assert.equal((await enviar(ocupado())).json().result, "ACCEPTED");
+    ciclo = await cicloDaOcupacao();
+    assert.equal(ciclo.situacao, "encerrada");
+    assert.equal(ciclo.encerrado_por, "saida");
+    assert.equal(ciclo.inicio_horario, "2026-09-21T13:54:54.986-03:00");
+    assert.equal(ciclo.duracao_min, 2.03);
+    assert.ok(ciclo.fotos.linha && ciclo.fotos.entrada && ciclo.fotos.saida);
+  });
+
+  it("a placa só vem no OCCUPIED: a do VACATED (texto, confianças e caixa) é ignorada", async () => {
+    await iniciarSemHost();
+    await enviar(ocupado());
+    await enviar(
+      liberado({
+        plate: {
+          status: "READ",
+          value: "OUT9R99",
+          plateConfidence: 0.5,
+          plateDetectionConfidence: 0.5,
+          boundingBox: { xMin: 1, yMin: 1, xMax: 10, yMax: 10 },
+        },
+      }),
+    );
+    const ciclo = await cicloDaOcupacao();
+    assert.equal(ciclo.placa?.texto, "QRP7J32");
+    assert.equal(ciclo.placa?.confianca_ocr, 0.99);
+    assert.equal(ciclo.placa?.confianca_deteccao, 0.98);
+    assert.deepEqual(
+      ciclo.caixas?.saida?.map((caixa) => caixa.tipo),
+      ["veiculo"],
+    );
+
+    // Sem leitura na entrada, o ciclo fica sem placa mesmo que o VACATED traga uma.
+    await enviar(
+      ocupado({ messageId: "evt-0003", occupancyId: "71", plate: { status: "NOT_VISIBLE", value: null } }),
+    );
+    await enviar(
+      liberado({ messageId: "evt-0004", occupancyId: "71", plate: { status: "READ", value: "OUT9R99" } }),
+    );
+    const semPlaca = await painel().app.inject({ url: `/api/ciclos/${encodeURIComponent("EMB-001:71")}` });
+    assert.equal(semPlaca.json().placa, null);
+  });
+
+  it("as caixas do OCCUPIED são sempre da foto PLATE_CROSSING, mesmo sem ela no evento", async () => {
+    await iniciarSemHost();
+    await enviar(ocupado({ images: [imagem("SPACE_OVERVIEW", FOTO_INTEIRA)] }));
+    const ciclo = await cicloDaOcupacao();
+    assert.equal(ciclo.fotos.linha, null);
+    assert.ok(ciclo.fotos.entrada);
+    assert.equal(ciclo.caixas?.entrada, undefined);
+    assert.equal(ciclo.caixas?.linha?.length, 2);
+  });
+
+  it("aceita o nome antigo `confidence` como confiança do OCR", async () => {
+    await iniciarSemHost();
+    await enviar(ocupado({ plate: { status: "READ", value: "ABC1D23", confidence: 0.94 } }));
+    const { placa } = await cicloDaOcupacao();
+    assert.equal(placa?.confianca_ocr, 0.94);
+    assert.equal(placa?.confianca_deteccao, null);
+  });
+
+  it("repetição do mesmo messageId: DUPLICATE com o recibo da primeira vez, também depois de reiniciar", async () => {
+    await iniciarSemHost();
+    const primeira = (await enviar(ocupado())).json();
+    const arquivo = path.join(pastaDados, PASTA_OCUPACAO, "dados.json");
+    const antes = await readFile(arquivo, "utf8");
+
+    const repetida = await enviar(ocupado());
+    assert.equal(repetida.statusCode, 200);
+    assert.equal(repetida.json().result, "DUPLICATE");
+    assert.equal(repetida.json().receiptId, primeira.receiptId);
+    assert.equal(repetida.json().receivedAt, primeira.receivedAt);
+    assert.equal(repetida.json().durable, true);
+    assert.equal(await readFile(arquivo, "utf8"), antes);
+
+    await painel().app.close();
+    await iniciarSemHost();
+    const depois = (await enviar(ocupado())).json();
+    assert.equal(depois.result, "DUPLICATE");
+    assert.equal(depois.receivedAt, primeira.receivedAt);
+  });
+
+  it("repetições simultâneas gravam uma vez só", async () => {
+    await iniciarSemHost();
+    const respostas = await Promise.all([enviar(ocupado()), enviar(ocupado())]);
+    assert.deepEqual(respostas.map((r) => r.json().result).sort(), ["ACCEPTED", "DUPLICATE"]);
+    assert.equal((await cicloDaOcupacao()).eventos?.length, 1);
+  });
+
+  it("recusa a foto cujo sha256 ou byteLength não confere (IMAGE_INTEGRITY), sem gravar nada", async () => {
+    await iniciarSemHost();
+    const shaErrado = await enviar(
+      ocupado({ images: [imagem("PLATE_CROSSING", FOTO_INTEIRA, { sha256: "0".repeat(64) })] }),
+    );
+    assert.equal(shaErrado.statusCode, 422);
+    assert.equal(shaErrado.json().result, "REJECTED");
+    assert.equal(shaErrado.json().durable, false);
+    assert.equal(shaErrado.json().messageId, "evt-0001");
+    assert.equal(shaErrado.json().error.code, "IMAGE_INTEGRITY");
+    assert.match(shaErrado.json().error.message, /sha256/);
+
+    const tamanhoErrado = await enviar(ocupado({ images: [imagem("SPACE_OVERVIEW", FOTO_INTEIRA, { byteLength: 5 })] }));
+    assert.equal(tamanhoErrado.statusCode, 422);
+    assert.match(tamanhoErrado.json().error.message, /byteLength/);
+    assert.equal((await listar()).total, 0);
+  });
+
+  it("recusa evento fora do formato (INVALID_MESSAGE) e versão desconhecida", async () => {
+    await iniciarSemHost();
+    const casos: [Record<string, unknown>, RegExp][] = [
+      [{ messageType: "PARKED" }, /messageType/],
+      [{ occupancyId: "" }, /occupancyId/],
+      [{ occurredAt: "ontem" }, /occurredAt/],
+      [{ plate: { status: "READ", value: "X", boundingBox: { xMin: 10, yMin: 0, xMax: 5, yMax: 3 } } }, /plate/],
+      [{ images: [{ ...imagem("SPACE_OVERVIEW", FOTO_INTEIRA), mimeType: "image/png" }] }, /mimeType/],
+    ];
+    for (const [alterar, campo] of casos) {
+      const resposta = await enviar(ocupado(alterar));
+      assert.equal(resposta.statusCode, 422, JSON.stringify(alterar));
+      assert.equal(resposta.json().error.code, "INVALID_MESSAGE");
+      assert.match(resposta.json().error.message, campo);
+    }
+
+    const versao = await enviar(ocupado({ schemaVersion: "2.0" }));
+    assert.equal(versao.statusCode, 422);
+    assert.equal(versao.json().error.code, "UNSUPPORTED_SCHEMA_VERSION");
+    assert.equal((await enviar(ocupado({ schemaVersion: "1.1" }))).statusCode, 200);
+  });
+
+  it("JSON quebrado recebe a recusa no formato do contrato", async () => {
+    await iniciarSemHost();
+    const resposta = await enviar("{ isto não é json");
+    assert.equal(resposta.statusCode, 400);
+    assert.equal(resposta.json().result, "REJECTED");
+    assert.equal(resposta.json().error.code, "INVALID_MESSAGE");
+  });
+
+  it("com token configurado, exige Authorization: Bearer <token>", async () => {
+    await iniciarSemHost("segredo");
+    const sem = await enviar(ocupado());
+    assert.equal(sem.statusCode, 401);
+    assert.equal(sem.json().result, "REJECTED");
+    assert.equal(sem.json().error.code, "UNAUTHORIZED");
+    assert.equal((await enviar(ocupado(), { authorization: "Bearer errado" })).statusCode, 401);
+    assert.equal((await enviar(ocupado(), { authorization: "Bearer segredo" })).statusCode, 200);
+  });
+
+  it("aceita eventos com fotos inteiras de vários MB", async () => {
+    await iniciarSemHost();
+    const grande = Buffer.concat([
+      FOTO_INTEIRA.subarray(0, -2),
+      Buffer.alloc(6 * 1024 * 1024, 7),
+      Buffer.from([0xff, 0xd9]),
+    ]);
+    const resposta = await enviar(
+      ocupado({ images: [imagem("PLATE_CROSSING", grande), imagem("SPACE_OVERVIEW", grande)] }),
+    );
+    assert.equal(resposta.statusCode, 200);
+  });
+
+  it("avisa a tela a cada evento gravado", async () => {
+    const endereco = await (await iniciarSemHost()).app.listen({ port: 0, host: "127.0.0.1" });
+    const controle = new AbortController();
+    const eventos = await fetch(`${endereco}/api/eventos`, { signal: controle.signal });
+    assert.ok(eventos.body);
+    const leitor = eventos.body.pipeThrough(new TextDecoderStream()).getReader();
+    await enviar(ocupado());
+    await enviar(liberado());
+
+    let recebido = "";
+    while (!recebido.includes('"situacao":"encerrada"')) {
+      const { value, done } = await leitor.read();
+      if (done) break;
+      recebido += value;
+    }
+    controle.abort();
+    const ciclos = recebido
+      .split("\n\n")
+      .filter((bloco) => bloco.startsWith("event: ciclo"))
+      .map((bloco) => JSON.parse(bloco.split("\n")[1]!.slice("data: ".length)) as Ciclo);
+    assert.deepEqual(
+      ciclos.map((ciclo) => ciclo.situacao),
+      ["ocupada", "encerrada"],
+    );
+  });
+
+  it("libera o envio a partir de um app no navegador (CORS), também nas recusas", async () => {
+    await iniciarSemHost("segredo");
+    const preflight = await painel().app.inject({
+      method: "OPTIONS",
+      url: "/eventos",
+      headers: {
+        origin: "http://app.exemplo",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type, authorization",
+      },
+    });
+    assert.equal(preflight.statusCode, 204);
+    assert.equal(preflight.headers["access-control-allow-origin"], "*");
+    assert.match(String(preflight.headers["access-control-allow-methods"]), /POST/);
+    assert.match(String(preflight.headers["access-control-allow-headers"]), /authorization/i);
+
+    const recusada = await enviar(ocupado(), { origin: "http://app.exemplo" });
+    assert.equal(recusada.statusCode, 401);
+    assert.equal(recusada.headers["access-control-allow-origin"], "*");
+  });
+
+  it("sem host configurado, a tela não recebe o aviso de host desconectado", async () => {
+    const endereco = await (await iniciarSemHost()).app.listen({ port: 0, host: "127.0.0.1" });
+    const controle = new AbortController();
+    const eventos = await fetch(`${endereco}/api/eventos`, { signal: controle.signal });
+    assert.ok(eventos.body);
+    const leitor = eventos.body.pipeThrough(new TextDecoderStream()).getReader();
+    let recebido = "";
+    while (!recebido.includes("event: host")) {
+      const { value, done } = await leitor.read();
+      if (done) break;
+      recebido += value;
+    }
+    controle.abort();
+    assert.ok(recebido.includes('event: host\ndata: {"conectado":null}'));
+
+    const status = (await painel().app.inject({ url: "/api/status" })).json();
+    assert.equal(status.host, null);
+    assert.equal(status.host_conectado, null);
   });
 });

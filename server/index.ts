@@ -1,10 +1,12 @@
-// Sobe o painel: conecta à API do host, grava os ciclos que ela empurra e serve a tela.
+// Sobe o painel: recebe os eventos que o app empurra (POST /eventos), grava e serve a tela.
 // Variáveis de ambiente:
-//   SMVEP_HOST         endereço da API do host, ex.: http://192.168.0.10:8000 (obrigatório)
+//   SMVEP_HOST         opcional: endereço da API do host, ex.: http://192.168.0.10:8000;
+//                      definido, o painel também se conecta a ele por WebSocket
 //   SMVEP_PORTA        porta da tela (padrão 8080)
 //   SMVEP_INTERFACE    interface da tela (padrão 0.0.0.0: outros computadores também abrem)
 //   SMVEP_DADOS        pasta dos ciclos, relativa à raiz do projeto (padrão dados/ciclos)
-//   SMVEP_ENVIO_TOKEN  o mesmo token do host, se ele exigir
+//   SMVEP_ENVIO_TOKEN  definido, o POST /eventos exige "Authorization: Bearer <token>";
+//                      também vai para o host no WebSocket
 //   SMVEP_ABRIR_NAVEGADOR=1  abre a tela no navegador ao iniciar (INICIAR-PAINEL.cmd)
 import { spawn } from "node:child_process";
 import os from "node:os";
@@ -56,51 +58,63 @@ function abrirNavegador(url: string): void {
   filho.unref();
 }
 
+/** IPv4 desta máquina na rede local: os endereços que o app pode usar para chegar ao painel. */
+function enderecosLocais(): string[] {
+  return Object.values(os.networkInterfaces())
+    .flat()
+    .filter((rede) => rede && rede.family === "IPv4" && !rede.internal)
+    .map((rede) => rede!.address);
+}
+
 function principal(): void {
   const enderecoHost = process.env.SMVEP_HOST?.trim();
-  if (!enderecoHost) {
-    console.error(
-      "[PAINEL] Falta o endereço do host (a máquina de visão que roda python -m api).\n" +
-        "         Exemplo (PowerShell):  $env:SMVEP_HOST = \"http://192.168.0.10:8000\"\n" +
-        "         Pelo INICIAR-PAINEL.cmd, ele fica salvo no arquivo host.txt.",
-    );
-    process.exit(2);
-  }
-  let host: { http: string; ws: string };
-  try {
-    host = enderecosDoHost(enderecoHost);
-  } catch (erro) {
-    console.error(`[PAINEL] Endereço do host inválido: "${enderecoHost}" (${(erro as Error).message}).`);
-    process.exit(2);
+  let host: { http: string; ws: string } | null = null;
+  if (enderecoHost) {
+    try {
+      host = enderecosDoHost(enderecoHost);
+    } catch (erro) {
+      console.error(`[PAINEL] Endereço do host inválido: "${enderecoHost}" (${(erro as Error).message}).`);
+      process.exit(2);
+    }
   }
 
   desligarPausaDoConsole();
   void iniciar(host);
 }
 
-async function iniciar(host: { http: string; ws: string }): Promise<void> {
-  const servidor = await criarServidor({ pastaDados, pastaWeb, host: host.http });
+async function iniciar(host: { http: string; ws: string } | null): Promise<void> {
+  const servidor = await criarServidor({ pastaDados, pastaWeb, host: host?.http ?? null, token });
   const { app, armazenamento } = servidor;
   await app.listen({ port: porta, host: interfaceRede });
 
   const tela = `http://localhost:${porta}`;
   console.log(`[PAINEL] Tela: ${tela}  (${armazenamento.total} ciclo(s) em ${pastaDados})`);
-  console.log(`[PAINEL] Host: ${host.http}  (Swagger da API: ${host.http}/docs)`);
-  console.log(token ? "[PAINEL] Token configurado (SMVEP_ENVIO_TOKEN)." : "[PAINEL] Sem token.");
+  const locais = interfaceRede === "0.0.0.0" ? enderecosLocais() : [interfaceRede];
+  console.log("[PAINEL] No app, use o endereço deste painel (o app envia POST /eventos):");
+  for (const ip of locais.length ? locais : ["localhost"]) console.log(`         http://${ip}:${porta}`);
+  console.log(
+    token
+      ? "[PAINEL] Token configurado: o app precisa enviar Authorization: Bearer <token>."
+      : "[PAINEL] Sem token: qualquer app na rede pode enviar eventos.",
+  );
 
-  const conexao = conectarAoHost({
-    url: host.ws,
-    painel: os.hostname(),
-    token,
-    receber: servidor.receber,
-    aoMudarEstado: servidor.definirHostConectado,
-  });
+  let conexao: { parar(): void } | null = null;
+  if (host) {
+    console.log(`[PAINEL] Host: ${host.http}  (Swagger da API: ${host.http}/docs)`);
+    conexao = conectarAoHost({
+      url: host.ws,
+      painel: os.hostname(),
+      token,
+      receber: servidor.receber,
+      aoMudarEstado: servidor.definirHostConectado,
+    });
+  }
 
   if (process.env.SMVEP_ABRIR_NAVEGADOR === "1") abrirNavegador(tela);
 
   for (const sinal of ["SIGINT", "SIGTERM"] as const) {
     process.once(sinal, () => {
-      conexao.parar();
+      conexao?.parar();
       void app.close().then(() => process.exit(0));
     });
   }

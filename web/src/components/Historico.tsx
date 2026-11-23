@@ -18,8 +18,9 @@ export function Historico({ ciclos, selecionado, onSelecionar }: Props) {
       ) : (
         <ul className="historico-lista">
           {ciclos.map((ciclo) => {
-            const miniatura = ciclo.fotos.entrada ?? ciclo.fotos.linha;
-            const hora = formatarHoraMinuto(ciclo.fim_horario);
+            const miniatura = ciclo.fotos.entrada ?? ciclo.fotos.linha ?? ciclo.fotos.saida;
+            const naVaga = ciclo.encerrado_por === null;
+            const hora = formatarHoraMinuto(naVaga ? ciclo.inicio_horario : ciclo.fim_horario);
             return (
               <li key={ciclo.chave}>
                 <button
@@ -33,8 +34,14 @@ export function Historico({ ciclos, selecionado, onSelecionar }: Props) {
                   </span>
                   <span className="cartao-info">
                     <strong className={ciclo.placa ? undefined : "sem-placa"}>{ciclo.placa?.texto ?? "SEM PLACA"}</strong>
-                    <span className="cartao-meta">Fim: {hora ?? "—"}</span>
-                    <span className="cartao-duracao">Dur: {formatarMinutos(ciclo.duracao_min) ?? "—"}</span>
+                    <span className="cartao-meta">
+                      {naVaga ? "Entrou" : "Fim"}: {hora ?? "—"}
+                    </span>
+                    {naVaga ? (
+                      <span className="cartao-duracao cartao-na-vaga">Na vaga</span>
+                    ) : (
+                      <span className="cartao-duracao">Dur: {formatarMinutos(ciclo.duracao_min) ?? "—"}</span>
+                    )}
                   </span>
                 </button>
               </li>

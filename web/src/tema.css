@@ -272,11 +272,18 @@ button {
   text-transform: uppercase;
 }
 
-.origem {
+/* Canto superior direito do visor: botão das caixas e o dispositivo. */
+.visor-topo {
   position: absolute;
   top: 16px;
   right: 16px;
-  z-index: 1;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.origem {
   padding: 4px 10px;
   border-radius: 4px;
   background: rgba(4, 7, 13, 0.75);
@@ -397,6 +404,76 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+/* Foto inteira com as caixas por cima (FotoComCaixas): o SVG ocupa o espaço da
+   foto e a encaixa nele, sem distorcer, como o object-fit: contain do <img>. */
+.foto-caixas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.caixa-borda {
+  fill: none;
+  stroke-width: 2.5;
+}
+
+.caixa-veiculo .caixa-borda {
+  stroke: var(--ciano);
+}
+
+.caixa-placa .caixa-borda {
+  stroke: var(--verde);
+}
+
+.caixa-rotulo text {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  fill: #04070d;
+}
+
+.caixa-veiculo .caixa-rotulo rect {
+  fill: var(--ciano);
+}
+
+.caixa-placa .caixa-rotulo rect {
+  fill: var(--verde);
+}
+
+.visor-caixas {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--painel-borda);
+  border-radius: 999px;
+  background: rgba(4, 7, 13, 0.8);
+  color: var(--texto-suave);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.visor-caixas:hover {
+  color: var(--texto);
+}
+
+.visor-caixas[aria-pressed="true"] {
+  border-color: rgba(34, 211, 238, 0.45);
+  color: var(--ciano);
+  background: rgba(4, 7, 13, 0.85);
+}
+
+.visor-caixas:focus-visible {
+  outline: 2px solid var(--ciano);
+  outline-offset: 2px;
+}
+
 /* ---------- Histórico ---------- */
 
 .historico {
@@ -499,6 +576,13 @@ button {
   color: var(--verde);
   font-size: 11px;
   font-weight: 700;
+}
+
+/* Veículo ainda na vaga (só chegou o OCCUPIED). */
+.cartao-na-vaga {
+  color: var(--ciano);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 @keyframes entrar {

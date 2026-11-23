@@ -38,11 +38,31 @@ async function gravarArquivo(caminho: string, conteudo: string | Buffer): Promis
   }
 }
 
+/**
+ * O que um evento muda num ciclo: `campos` é o ciclo inteiro já mesclado (sem
+ * chave, fotos e datas de recebimento); `fotos` só as fotos novas; as outras
+ * continuam como estavam gravadas.
+ */
+export interface Alteracao {
+  campos: Record<string, unknown>;
+  fotos: Partial<Record<NomeFoto, Buffer>>;
+}
+
+export interface ResultadoAlteracao {
+  /** `false` quando `montar` devolveu `null` (nada a gravar). */
+  alterado: boolean;
+  ciclo: Ciclo | undefined;
+}
+
+const chaveDaMensagem = (dispositivo: string, messageId: string) => `${dispositivo}\n${messageId}`;
+
 export class Armazenamento {
   readonly raiz: string;
   #porChave = new Map<string, Ciclo>();
   #chavePorPasta = new Map<string, string>();
-  #emAndamento = new Map<string, Promise<ResultadoGravacao>>();
+  /** `<dispositivo>\n<messageId>` → chave do ciclo que recebeu o evento. */
+  #porMensagem = new Map<string, string>();
+  #emAndamento = new Map<string, Promise<unknown>>();
 
   constructor(raiz: string) {
     this.raiz = path.resolve(raiz);
@@ -60,11 +80,53 @@ export class Armazenamento {
       if (!entrada.isDirectory()) continue;
       const ciclo = await this.#lerPasta(entrada.name).catch(() => null);
       if (ciclo && !this.#porChave.has(ciclo.chave)) {
-        this.#porChave.set(ciclo.chave, ciclo);
+        this.#guardar(ciclo);
         this.#chavePorPasta.set(entrada.name, ciclo.chave);
       }
     }
     return this.#porChave.size;
+  }
+
+  /** Ciclo que já recebeu este evento do app (o mesmo `messageId` do mesmo dispositivo). */
+  cicloDaMensagem(dispositivo: string, messageId: string): Ciclo | undefined {
+    const chave = this.#porMensagem.get(chaveDaMensagem(dispositivo, messageId));
+    return chave === undefined ? undefined : this.#porChave.get(chave);
+  }
+
+  #guardar(ciclo: Ciclo): void {
+    this.#porChave.set(ciclo.chave, ciclo);
+    if (Array.isArray(ciclo.eventos) && typeof ciclo.dispositivo === "string") {
+      for (const evento of ciclo.eventos) {
+        this.#porMensagem.set(chaveDaMensagem(ciclo.dispositivo, evento.messageId), ciclo.chave);
+      }
+    }
+  }
+
+  /** Uma operação por vez em cada chave, na ordem de chegada. */
+  async #emFila<T>(chave: string, operacao: () => Promise<T>): Promise<T> {
+    const anterior = this.#emAndamento.get(chave);
+    const atual = (anterior ?? Promise.resolve()).catch(() => undefined).then(operacao);
+    this.#emAndamento.set(chave, atual);
+    try {
+      return await atual;
+    } finally {
+      if (this.#emAndamento.get(chave) === atual) this.#emAndamento.delete(chave);
+    }
+  }
+
+  /**
+   * Aplica uma alteração ao ciclo da chave (criando-o se não existe). `montar`
+   * recebe o ciclo como está gravado, já depois das alterações anteriores da
+   * mesma chave, e devolve o que gravar, ou `null` para não gravar nada.
+   */
+  async alterar(chave: string, montar: (existente: Ciclo | undefined) => Alteracao | null): Promise<ResultadoAlteracao> {
+    return this.#emFila(chave, async () => {
+      const existente = this.#porChave.get(chave);
+      const alteracao = montar(existente);
+      if (!alteracao) return { alterado: false, ciclo: existente };
+      const ciclo = await this.#escrever(chave, alteracao.campos, alteracao.fotos, existente);
+      return { alterado: true, ciclo };
+    });
   }
 
   listar(limite: number): Ciclo[] {
@@ -83,30 +145,32 @@ export class Armazenamento {
    */
   async gravar(corpo: CicloRecebido): Promise<ResultadoGravacao> {
     const chave = chaveDoCiclo(corpo);
-    // Uma gravação por vez em cada chave: a que chega espera a anterior e só
-    // então compara as revisões, com o que ficou gravado.
-    const anterior = this.#emAndamento.get(chave);
-    const gravacao = (anterior ?? Promise.resolve())
-      .catch(() => undefined)
-      .then(() => this.#gravarSeMaisNovo(chave, corpo));
-    this.#emAndamento.set(chave, gravacao);
-    try {
-      return await gravacao;
-    } finally {
-      if (this.#emAndamento.get(chave) === gravacao) this.#emAndamento.delete(chave);
-    }
+    // A que chega espera a gravação anterior da chave e só então compara as
+    // revisões, com o que ficou gravado.
+    return this.#emFila(chave, async () => {
+      const existente = this.#porChave.get(chave);
+      if (existente && revisaoDoCiclo(corpo) <= revisaoDoCiclo(existente)) {
+        return { duplicado: true, atualizado: false, ciclo: existente };
+      }
+      // O ciclo do host vem completo: foto ausente apaga a que estava gravada.
+      const { fotos, ...campos } = corpo;
+      const novas: Partial<Record<NomeFoto, Buffer | null>> = {};
+      for (const nome of NOMES_FOTOS) novas[nome] = fotos[nome] ? Buffer.from(fotos[nome], "base64") : null;
+      const ciclo = await this.#escrever(chave, campos, novas, existente);
+      return { duplicado: false, atualizado: existente !== undefined, ciclo };
+    });
   }
 
-  async #gravarSeMaisNovo(chave: string, corpo: CicloRecebido): Promise<ResultadoGravacao> {
-    const existente = this.#porChave.get(chave);
-    if (existente && revisaoDoCiclo(corpo) <= revisaoDoCiclo(existente)) {
-      return { duplicado: true, atualizado: false, ciclo: existente };
-    }
-    return this.#gravarPasta(chave, corpo, existente);
-  }
-
-  /** Escreve as fotos e o dados.json; `existente` é o ciclo que esta revisão substitui. */
-  async #gravarPasta(chave: string, corpo: CicloRecebido, existente?: Ciclo): Promise<ResultadoGravacao> {
+  /**
+   * Escreve as fotos e o dados.json. `fotos`: Buffer grava, `null` apaga, foto
+   * ausente fica como estava. `existente` é o ciclo que esta gravação substitui.
+   */
+  async #escrever(
+    chave: string,
+    campos: Record<string, unknown>,
+    fotos: Partial<Record<NomeFoto, Buffer | null>>,
+    existente?: Ciclo,
+  ): Promise<Ciclo> {
     const pasta = this.#reservarPasta(chave);
     try {
       const destino = path.join(this.raiz, pasta);
@@ -117,13 +181,15 @@ export class Armazenamento {
       const arquivos = {} as Record<NomeFoto, string | null>;
       for (const nome of NOMES_FOTOS) {
         const arquivo = path.join(destino, `${nome}.jpg`);
-        const base64 = corpo.fotos[nome];
-        if (base64) {
-          await gravarArquivo(arquivo, Buffer.from(base64, "base64"));
+        const foto = fotos[nome];
+        if (foto) {
+          await gravarArquivo(arquivo, foto);
           arquivos[nome] = `${nome}.jpg`;
-        } else {
+        } else if (foto === null) {
           await rm(arquivo, { force: true });
           arquivos[nome] = null;
+        } else {
+          arquivos[nome] = existente?.fotos[nome] ? `${nome}.jpg` : null;
         }
       }
 
@@ -133,18 +199,18 @@ export class Armazenamento {
         ? { recebido_em: existente.recebido_em, atualizado_em: agora }
         : { recebido_em: agora };
       const temporario = path.join(destino, "dados.json.tmp");
-      const dados = { chave, ...corpo, fotos: arquivos, ...datas };
+      const dados = { chave, ...campos, fotos: arquivos, ...datas };
       await gravarArquivo(temporario, `${JSON.stringify(dados, null, 2)}\n`);
       await rename(temporario, path.join(destino, "dados.json"));
 
-      const ciclo: Ciclo = {
-        ...corpo,
+      const ciclo = {
+        ...campos,
         chave,
         fotos: this.#urlsFotos(pasta, arquivos),
         ...datas,
-      };
-      this.#porChave.set(chave, ciclo);
-      return { duplicado: false, atualizado: existente !== undefined, ciclo };
+      } as Ciclo;
+      this.#guardar(ciclo);
+      return ciclo;
     } catch (erro) {
       // A pasta de um ciclo já gravado continua dele: o dados.json anterior vale.
       if (!existente) this.#chavePorPasta.delete(pasta);

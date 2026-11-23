@@ -12,7 +12,7 @@ const ROTULOS: Record<Conexao, string> = {
 
 const DESCRICOES: Record<Conexao, string> = {
   conectando: "Conectando ao servidor do painel",
-  online: "Recebendo os ciclos do host em tempo real",
+  online: "Recebendo os ciclos em tempo real",
   "sem-host": "O painel está no ar, mas sem conexão com o host (máquina de visão); tentando de novo a cada 2 s",
   reconectando: "Conexão com o servidor do painel perdida; tentando de novo",
   offline: "Sem conexão com o servidor do painel",

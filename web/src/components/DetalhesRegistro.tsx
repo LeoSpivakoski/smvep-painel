@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { textoSemFotoSaida } from "../../../shared/ciclo.ts";
 import type { Ciclo } from "../../../shared/ciclo.ts";
 import { formatarConfianca, formatarDiaHora, formatarMinutos } from "../formatar.ts";
+import { FotoComCaixas } from "./FotoComCaixas.tsx";
 import { PlacaMercosul } from "./PlacaMercosul.tsx";
 
 type Tom = "ciano" | "verde" | "ambar" | "vermelho";
@@ -34,12 +35,22 @@ function Campo({ rotulo, valor, tom, largo, compacto }: CampoProps) {
   );
 }
 
+/** Com o veículo ainda na vaga (só o OCCUPIED chegou). */
+const NA_VAGA = { texto: "NA VAGA", tom: "verde" } as const;
+
 function FotoSaida({ ciclo }: { ciclo: Ciclo | null }) {
   const foto = ciclo?.fotos.saida;
   if (foto) {
     return (
       <a className="foto-saida" href={foto} target="_blank" rel="noreferrer" title="Abrir a foto em tamanho real">
-        <img key={foto} src={foto} alt={`Veículo ${ciclo.placa?.texto ?? "sem placa"} saindo da vaga`} />
+        <FotoComCaixas
+          url={foto}
+          alt={`Veículo ${ciclo.placa?.texto ?? "sem placa"} saindo da vaga`}
+          caixas={ciclo.caixas?.saida}
+          dimensoes={ciclo.dimensoes?.saida}
+          placa={ciclo.placa?.texto ?? null}
+          rotulos={false}
+        />
       </a>
     );
   }
@@ -53,9 +64,12 @@ function FotoSaida({ ciclo }: { ciclo: Ciclo | null }) {
 
 export function DetalhesRegistro({ ciclo }: { ciclo: Ciclo | null }) {
   const placa = ciclo?.placa ?? null;
-  const encerramento = ciclo
-    ? (ENCERRAMENTOS[ciclo.encerrado_por] ?? { texto: ciclo.encerrado_por.toUpperCase(), tom: "ambar" as const })
-    : null;
+  const motivo = ciclo?.encerrado_por;
+  const encerramento = !ciclo
+    ? null
+    : motivo === null || motivo === undefined
+      ? NA_VAGA
+      : (ENCERRAMENTOS[motivo] ?? { texto: motivo.toUpperCase(), tom: "ambar" as const });
 
   return (
     <aside className="painel detalhes" aria-labelledby="titulo-detalhes">
@@ -80,7 +94,12 @@ export function DetalhesRegistro({ ciclo }: { ciclo: Ciclo | null }) {
       </dl>
       <hr className="separador" />
       <dl className="grade">
-        <Campo rotulo="Encerrado por" valor={encerramento?.texto} tom={encerramento?.tom} largo />
+        <Campo
+          rotulo={encerramento === NA_VAGA ? "Situação" : "Encerrado por"}
+          valor={encerramento?.texto}
+          tom={encerramento?.tom}
+          largo
+        />
       </dl>
     </aside>
   );

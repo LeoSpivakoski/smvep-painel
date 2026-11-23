@@ -19,7 +19,7 @@ export function App() {
     setEscolhido(chave === ciclos[0]?.chave ? null : chave);
   }
 
-  let mensagemVazia = "Aguardando o primeiro ciclo do host";
+  let mensagemVazia = "Aguardando o primeiro ciclo";
   if (!carregado) mensagemVazia = "Carregando…";
   else if (conexao === "offline") mensagemVazia = "Sem conexão com o servidor do painel";
   else if (conexao === "sem-host") mensagemVazia = "Sem conexão com o host (máquina de visão)";

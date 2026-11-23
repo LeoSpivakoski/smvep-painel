@@ -1,6 +1,6 @@
 ===============================================================================
  SMVEP - PAINEL DE MONITORAMENTO DE VAGAS
- Passo a passo: host (visão) numa máquina, painel em outra
+ Passo a passo: o app envia os eventos da vaga, o painel grava e mostra
 ===============================================================================
 
 O QUE ESTÁ NO PEN DRIVE
@@ -11,130 +11,65 @@ O QUE ESTÁ NO PEN DRIVE
   SMVEP-Painel\                 o painel (tela + servidor), pronto para rodar
     INICIAR-PAINEL.cmd          inicia o painel com dois cliques (Windows)
     PASSO-A-PASSO.txt           este arquivo
-    README.md                   documentação técnica
-    exemplos\                   5 ciclos reais gravados, para ver a tela sem o host
+    README.md                   documentação técnica (contrato completo do
+                                POST /eventos, com todas as respostas)
+    exemplos\                   ciclos gravados, para ver a tela sem o app
     node_modules\, web\dist\    dependências e tela já compiladas: não precisa
                                 de internet para rodar
 
 COMO FUNCIONA
 -------------
-  O HOST DECIDE QUANDO ENVIAR. O painel só recebe e mostra.
+  O APP DECIDE QUANDO ENVIAR. O painel só recebe, grava e mostra.
 
-  HOST = MÁQUINA DE VISÃO (a que roda o CodigosVisao-Embarcado)
-      python main.py ...      processa o vídeo e grava output\smvep.db
-      python -m api           API (FastAPI) na porta 8000: lê a fila do banco
-                              e EMPURRA cada parada encerrada para o painel
-              ^
-              |   o painel abre a conexão  ws://<IP-DO-HOST>:8000/ws/ciclos
-              |   e o host manda os ciclos por ela, um por vez
+  APP (a máquina de visão / integração IFSC-Spark)
+      tem um campo com o ENDEREÇO DO PAINEL, por exemplo
+          http://192.168.0.20:8080
+      e faz um  POST /eventos  a cada mudança da vaga:
+          OCCUPIED   o veículo parou na vaga (placa, fotos, caixas)
+          VACATED    o veículo saiu (motivo do fim, foto de saída)
+              |
               v
-  MÁQUINA DO PAINEL (a outra)
-      SMVEP-Painel: grava cada ciclo, confirma ao host e mostra na tela
-      tela: http://localhost:8080
+  MÁQUINA DO PAINEL
+      SMVEP-Painel: grava cada evento em disco, responde ACCEPTED ao app e
+      mostra na tela:  http://localhost:8080
 
-  Um "ciclo" chega quando uma parada termina. Carro ainda parado não aparece
-  no painel até a parada fechar. Cada ciclo leva o número (id) que o banco do
-  host gerou para ele e o motivo do fim:
+  O OCCUPIED e o VACATED da mesma parada têm o mesmo occupancyId e viram UM
+  registro na tela:
 
-      SAÍDA             a saída do carro foi vista (tem a foto de saída)
-      VEÍCULO PERDIDO   o carro sumiu sem a saída ser vista
-      FIM DO VÍDEO      o vídeo acabou com o carro na vaga
-      INTERROMPIDO      o processamento foi parado ou caiu com o carro na vaga
+      - Na ENTRADA (OCCUPIED) o veículo já aparece, marcado como NA VAGA,
+        com a placa, as confianças (OCR e detecção) e as fotos da linha de
+        snap e da entrada.
+      - Na SAÍDA (VACATED) o registro se completa: horário do fim, duração,
+        motivo do fim e foto de saída.
+      - Se o VACATED chegar antes do OCCUPIED, os dois são aceitos e o
+        registro se completa quando o outro chegar.
 
-  O host só marca um ciclo como enviado quando o painel confirma que gravou.
-  Se o painel estiver desligado, a fila espera no banco do host e é enviada
-  quando ele voltar. Se um envio falha, o host tenta de novo depois de uma
-  espera que cresce (5 s até 10 min), sem segurar os outros ciclos.
+  As fotos chegam inteiras, com as posições (x, y) das caixas do veículo e
+  da placa. O painel desenha as caixas sobre as fotos; o botão CAIXAS, no
+  canto do visor, mostra e oculta.
 
-  Se a placa só é lida depois de o ciclo já ter sido enviado, o host manda o
-  ciclo de novo e o painel atualiza o que tinha: a placa aparece na tela.
+      - As caixas do OCCUPIED são sempre da foto da linha de snap
+        (PLATE_CROSSING).
+      - A caixa do VACATED (veículo) é da foto de saída.
+      - A placa só vem no OCCUPIED. Uma placa que venha no VACATED é
+        ignorada.
 
-  O host e o painel usam a MESMA SENHA (token). Sem ela, o host só atende a
-  própria máquina. Veja a Parte 3 antes de começar.
+  Motivos do fim (closureReason do VACATED):
 
-  ATUALIZE O PAINEL ANTES DO HOST. O painel novo funciona com o host antigo;
-  o painel antigo não entende tudo o que o host novo envia.
+      SAÍDA             DEPARTURE_OBSERVED: a saída do carro foi vista
+      VEÍCULO PERDIDO   VEHICLE_LOST: o carro sumiu sem a saída ser vista
+      FIM DO VÍDEO      END_OF_VIDEO: o vídeo acabou com o carro na vaga
+      INTERROMPIDO      INTERRUPTED: o processamento parou com o carro na vaga
 
-
-===============================================================================
- PARTE 1 - HOST (MÁQUINA DE VISÃO)
-===============================================================================
-
-Tudo a partir da pasta CodigosVisao-Embarcado, com o mesmo Python (venv) que
-roda o main.py.
-
-1) Instale as dependências da API (uma vez só; precisa de internet):
-
-       cd C:\Users\leosp\Desktop\CodigosVisao-Embarcado
-       python -m pip install fastapi==0.162.4 uvicorn==0.54.0 websockets==17.4
-
-2) Libere a porta 8000 no firewall DO HOST (é o painel que se conecta a ele).
-   Abra o PowerShell como ADMINISTRADOR e rode:
-
-       New-NetFirewallRule -DisplayName "SMVEP API (8000)" -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow -Profile Any
-
-   Linux (ufw):
-
-       sudo ufw allow 8000/tcp
-
-3) Terminal 1 - processamento (o comando de sempre), por exemplo:
-
-       cd C:\Users\leosp\Desktop\CodigosVisao-Embarcado
-       python main.py --media <video> --model <modelo>
-
-   Na primeira execução com esta versão, o banco é atualizado para a versão 6
-   (a fila "envios" passa a guardar a revisão e as falhas de envio). Antes
-   disso o programa faz uma cópia automática, como output\smvep.v5.bak.db.
-
-   O banco NÃO é mais zerado a cada execução: ele acumula os vídeos
-   processados e guarda o que o painel ainda não recebeu. Para começar um
-   teste com o banco vazio, acrescente --reset-database:
-
-       python main.py --media <video> --model <modelo> --reset-database
-
-   (isso apaga também os ciclos que ainda não chegaram ao painel; os que já
-   chegaram continuam gravados no painel).
-
-4) Terminal 2 - a API que envia ao painel (PowerShell). Defina a senha antes,
-   a mesma que vai no painel (Parte 3):
-
-       cd C:\Users\leosp\Desktop\CodigosVisao-Embarcado
-       $env:SMVEP_ENVIO_TOKEN = "troque-por-um-segredo"
-       python -m api
-
-   Sem a senha, a API não sobe e explica as saídas. Deixe aberto. Anote o IP
-   da linha:
-
-       [API] No painel, use o endereço do host: http://192.168.0.10:8000
-
-   Se aparecer "Outros IPs desta máquina", use o da mesma rede do painel
-   (192.168.56.x costuma ser do VirtualBox: não use esse). Para o IP não
-   mudar, fixe-o no roteador (reserva de DHCP) ou na placa de rede.
-
-   A API pode ser iniciada antes ou depois do processamento, e parada e
-   reiniciada quando quiser: o que ainda não foi enviado fica na fila do
-   banco.
-
-5) (Opcional) Documentação da API (Swagger), no navegador do host:
-
-       http://localhost:8000/docs
-
-   Clique em "Authorize", cole a senha (o valor de SMVEP_ENVIO_TOKEN) e
-   confirme. Depois dá para ver a fila (GET /api/ciclos, com as tentativas e
-   o último erro de cada ciclo), um ciclo inteiro (GET /api/ciclos/{id}), as
-   fotos e o estado (GET /api/status), com o botão "Try it out". Sem a senha,
-   essas consultas respondem 401. Funciona sem internet.
-
-   Não clique dentro da janela do processamento: no console do Windows, um
-   clique entra no modo "Selecionar" (aparece no título da janela) e congela
-   o programa até alguém apertar Enter ou Esc. A janela da API já desliga
-   isso sozinha. Na do processamento, se acontecer, aperte Esc; para desligar
-   de vez: botão direito na barra de título > Propriedades > desmarque "Modo
-   de Edição Rápida".
+  O painel só responde ACCEPTED depois de gravar no disco. O app deve dar o
+  evento por entregue com ACCEPTED ou DUPLICATE (o mesmo messageId já tinha
+  chegado). Sem resposta ou com erro 5xx, nada foi gravado: o app tenta de
+  novo. Com REJECTED, o evento tem um problema (a mensagem diz qual) e
+  repetir não adianta.
 
 
 ===============================================================================
- PARTE 2 - MÁQUINA DO PAINEL
+ PARTE 1 - MÁQUINA DO PAINEL
 ===============================================================================
 
 1) Instale o Node.js 24 ou mais novo
@@ -152,45 +87,42 @@ roda o main.py.
 
        C:\SMVEP-Painel
 
-   (Dá para rodar direto do pen drive, mas os ciclos recebidos são gravados
+   (Dá para rodar direto do pen drive, mas os eventos recebidos são gravados
    dentro da pasta. Prefira o disco.)
 
-3) Teste se o host responde (troque pelo IP anotado na Parte 1, passo 4, e
-   pela senha):
+3) Libere a porta 8080 no firewall DO PAINEL (é o app que se conecta a ele).
+   Abra o PowerShell como ADMINISTRADOR e rode:
 
-       curl.exe -H "Authorization: Bearer troque-por-um-segredo" http://<IP-DO-HOST>:8000/api/status
+       New-NetFirewallRule -DisplayName "SMVEP Painel (8080)" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow -Profile Any
 
-   Resposta esperada:  {"ok":true,...}
-   Se responder  {"detail":"Token ausente ou inválido."} : o host respondeu,
-   mas a senha não confere com a dele.
-   Se der timeout: confira o firewall do HOST (Parte 1, passo 2), se a API
-   está aberta no host, se as duas máquinas estão na mesma rede e o IP.
-
-4) Grave a senha do painel
+4) (Recomendado) Grave a senha do painel
+   Com uma senha (token), o painel só aceita eventos de quem a apresenta.
    Crie o arquivo  C:\SMVEP-Painel\token.txt  com a senha numa linha só, a
-   mesma do host (Parte 3). Pelo PowerShell:
+   mesma que será configurada no app (Parte 3). Pelo PowerShell:
 
        Set-Content -Path C:\SMVEP-Painel\token.txt -Value "troque-por-um-segredo" -Encoding ascii
+
+   Sem o token.txt, qualquer computador da rede consegue enviar eventos.
 
 5) Inicie o painel
    Dois cliques em  C:\SMVEP-Painel\INICIAR-PAINEL.cmd
 
-   Na primeira vez ele pergunta o endereço do host. Digite o IP e a porta,
-   por exemplo:
+   A janela mostra "Token: configurado" quando achou a senha, e o endereço
+   que deve ser digitado no app:
 
-       192.168.0.10:8000
+       [PAINEL] No app, use o endereço deste painel (o app envia POST /eventos):
+                http://192.168.0.20:8080
 
-   O endereço fica salvo em C:\SMVEP-Painel\host.txt (para trocar de host,
-   edite ou apague esse arquivo). A janela mostra "Token: configurado" quando
-   achou a senha. A tela abre sozinha no navegador.
+   Se aparecerem vários, use o da mesma rede do app (192.168.56.x costuma
+   ser do VirtualBox: não use esse). Para o IP não mudar, fixe-o no roteador
+   (reserva de DHCP) ou na placa de rede.
 
-   Deixe a janela aberta enquanto o painel estiver em uso.
-   Para parar: feche a janela ou aperte Ctrl+C.
+   A tela abre sozinha no navegador. Deixe a janela aberta enquanto o painel
+   estiver em uso. Para parar: feche a janela ou aperte Ctrl+C.
 
    Pelo terminal, sem o .cmd (PowerShell):
 
        cd C:\SMVEP-Painel
-       $env:SMVEP_HOST = "http://192.168.0.10:8000"
        $env:SMVEP_ENVIO_TOKEN = "troque-por-um-segredo"
        node server\index.ts
 
@@ -199,66 +131,100 @@ roda o main.py.
        http://localhost:8080
 
    De outro computador da mesma rede:  http://<IP-DO-PAINEL>:8080
-   (nesse caso, libere a porta 8080 no firewall da máquina do painel).
 
    A pílula no topo mostra:
-     ONLINE        recebendo do host
-     SEM HOST      o painel está no ar, mas sem conexão com o host
-                   (tenta de novo sozinho a cada 2 segundos)
+     ONLINE        pronto para receber os eventos do app
      RECONECTANDO / OFFLINE   a tela perdeu o servidor do painel
                    (a janela do painel foi fechada?)
+     SEM HOST      só se o painel também estiver ligado a um host (Parte 5)
+                   e a conexão com ele caiu
 
-7) (Opcional) Ver a tela com os exemplos, sem o host
+   No histórico, um veículo ainda na vaga aparece com "Entrou: <hora>" e
+   NA VAGA; depois da saída, com "Fim: <hora>" e a duração.
+
+7) (Opcional) Ver a tela com os exemplos, sem o app
    Feche o painel e, num PowerShell:
 
        cd C:\SMVEP-Painel
-       $env:SMVEP_HOST = "127.0.0.1"
        $env:SMVEP_DADOS = "exemplos"
        node server\index.ts
 
-   Abra http://localhost:8080: os 5 ciclos de exemplo aparecem (a pílula fica
-   em SEM HOST, porque não há host). Para voltar ao normal, feche esse
-   terminal e use o INICIAR-PAINEL.cmd.
+   Abra http://localhost:8080. Para voltar ao normal, feche esse terminal e
+   use o INICIAR-PAINEL.cmd.
+
+
+===============================================================================
+ PARTE 2 - APP (QUEM ENVIA OS EVENTOS)
+===============================================================================
+
+1) No campo de endereço do app, digite o endereço que a janela do painel
+   mostra (Parte 1, passo 5), por exemplo:
+
+       http://192.168.0.20:8080
+
+   O app envia cada evento para  <endereço>/eventos , com
+   Content-Type: application/json.
+
+2) Se o painel tem senha (token.txt), o app manda também o cabeçalho:
+
+       Authorization: Bearer troque-por-um-segredo
+
+3) Teste da máquina do app (troque pelo IP do painel):
+
+       curl.exe http://<IP-DO-PAINEL>:8080/api/status
+
+   Resposta esperada:  {"ok":true,...}
+   Se der timeout: confira o firewall do PAINEL (Parte 1, passo 3), se a
+   janela do painel está aberta, se as duas máquinas estão na mesma rede e
+   o IP.
+
+4) Envie um evento de exemplo (os JSONs de exemplos_json_integracao_ifsc_spark):
+
+       curl.exe -X POST http://<IP-DO-PAINEL>:8080/eventos -H "Content-Type: application/json" -H "Authorization: Bearer troque-por-um-segredo" --data-binary "@01_evento_entrada_occupied_request_smvep.json"
+
+   Resposta esperada (como o exemplo 02):
+
+       {"schemaVersion":"1.0","messageId":"...","messageType":"OCCUPIED",
+        "deviceId":"EMB-001","result":"ACCEPTED","receiptId":"rcpt-...",
+        "receivedAt":"...","durable":true}
+
+   O veículo aparece na tela como NA VAGA. Envie o 03 (VACATED) e o registro
+   se completa. Enviar o mesmo arquivo de novo responde "DUPLICATE".
+
+   Respostas que o app precisa tratar:
+
+     200 ACCEPTED     gravado; o evento foi entregue
+     200 DUPLICATE    já estava gravado; também está entregue
+     401 REJECTED     UNAUTHORIZED: senha ausente ou diferente da do painel
+     422 REJECTED     INVALID_MESSAGE (campo fora do formato),
+                      UNSUPPORTED_SCHEMA_VERSION (o painel aceita 1.x) ou
+                      IMAGE_INTEGRITY (sha256 ou byteLength não conferem com
+                      a foto); a mensagem em error.message diz o que corrigir
+     5xx / sem resposta   não foi gravado: tente de novo mais tarde
+
+   O formato completo do evento está no README.md, em "Envio pelo app".
 
 
 ===============================================================================
  PARTE 3 - SENHA COMPARTILHADA (TOKEN)
 ===============================================================================
 
-Os ciclos levam placas e fotos de veículos. Por isso o host só atende a rede
-com uma senha (token): o painel precisa mandar a mesma senha para receber os
-ciclos, e as consultas do host (/api/... e /fotos/...) só respondem a quem a
-apresenta. Escolha um segredo só com letras e números e use o MESMO valor nas
-duas máquinas.
+Os eventos levam placas e fotos de veículos. Com uma senha (token), o painel
+só aceita eventos de quem a apresenta. Escolha um segredo só com letras e
+números e use o MESMO valor no painel e no app.
 
-  Host (PowerShell, antes de iniciar a API):
+  Painel, com o INICIAR-PAINEL.cmd: grave a senha numa linha em
+  C:\SMVEP-Painel\token.txt (Parte 1, passo 4). O arquivo fica só nesta
+  máquina e nunca vai para o git.
 
-       cd C:\Users\leosp\Desktop\CodigosVisao-Embarcado
-       $env:SMVEP_ENVIO_TOKEN = "troque-por-um-segredo"
-       python -m api
-
-  Máquina do painel, com o INICIAR-PAINEL.cmd: grave a senha numa linha em
-  C:\SMVEP-Painel\token.txt (Parte 2, passo 4). O arquivo fica só nesta
-  máquina.
-
-  Máquina do painel, pelo terminal:
+  Painel, pelo terminal:
 
        cd C:\SMVEP-Painel
        $env:SMVEP_ENVIO_TOKEN = "troque-por-um-segredo"
-       $env:SMVEP_HOST = "http://<IP-DO-HOST>:8000"
        node server\index.ts
 
-Sem a senha, o  python -m api  termina com um aviso. As duas saídas, só para
-testes:
-
-  Atender só a própria máquina (o painel precisa rodar no mesmo computador):
-
-       python -m api --host 127.0.0.1
-
-  Subir aberta numa rede de testes isolada (qualquer máquina da rede lê as
-  placas e as fotos):
-
-       python -m api --sem-token
+  App: envie o cabeçalho  Authorization: Bearer troque-por-um-segredo  em
+  cada POST /eventos.
 
 
 ===============================================================================
@@ -267,27 +233,57 @@ testes:
 
 Painel (defina no PowerShell antes de  node server\index.ts ):
 
-  Outra porta para a tela:
+  Outra porta (no app, use a mesma no endereço):
        $env:SMVEP_PORTA = "8081"
 
-  Outra pasta para os ciclos recebidos:
+  Outra pasta para os eventos recebidos:
        $env:SMVEP_DADOS = "D:\smvep-ciclos"
 
-  Onde ficam os ciclos: C:\SMVEP-Painel\dados\ciclos\  (uma pasta por ciclo,
-  com dados.json, linha.jpg, entrada.jpg e saida.jpg). Para backup, copie
-  essa pasta.
-
-Host (opções do  python -m api ):
-
-  Outra porta (use a mesma no endereço do host do painel):
-       python -m api --porta 8081
-
-  Outro banco:
-       python -m api --db D:\smvep.db
+  Onde ficam os registros: C:\SMVEP-Painel\dados\ciclos\  (uma pasta por
+  ocupação, por exemplo EMB-001_70, com dados.json, linha.jpg, entrada.jpg e
+  saida.jpg). O dados.json guarda também as caixas e os eventos recebidos.
+  Para backup, copie essa pasta.
 
 
 ===============================================================================
- PARTE 5 - SE O CÓDIGO DO PAINEL MUDAR (RECOMPILAR)
+ PARTE 5 - OPCIONAL: RECEBER TAMBÉM DO HOST (python -m api)
+===============================================================================
+
+O painel ainda sabe receber os ciclos completos da API do
+CodigosVisao-Embarcado (python -m api), pelo caminho antigo: o PAINEL abre a
+conexão  ws://<IP-DO-HOST>:8000/ws/ciclos  e o host empurra os ciclos por
+ela. Só é usado se o endereço do host estiver configurado; os eventos do app
+continuam chegando normalmente.
+
+1) No host: instale a API, libere a porta 8000 e inicie com a senha:
+
+       cd C:\Users\leosp\Desktop\CodigosVisao-Embarcado
+       python -m pip install fastapi==0.162.4 uvicorn==0.54.0 websockets==17.4
+       New-NetFirewallRule -DisplayName "SMVEP API (8000)" -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow -Profile Any
+       $env:SMVEP_ENVIO_TOKEN = "troque-por-um-segredo"
+       python -m api
+
+   (o New-NetFirewallRule precisa de PowerShell como administrador). Anote o
+   IP da linha "[API] No painel, use o endereço do host: ...".
+
+2) No painel: grave o endereço do host em  C:\SMVEP-Painel\host.txt  (uma
+   linha, por exemplo  192.168.0.10:8000 ) e use a MESMA senha do host no
+   token.txt. O INICIAR-PAINEL.cmd lê o host.txt sozinho. Pelo terminal:
+
+       $env:SMVEP_HOST = "http://192.168.0.10:8000"
+
+   Para desligar a conexão com o host, apague o host.txt.
+
+3) Teste se o host responde:
+
+       curl.exe -H "Authorization: Bearer troque-por-um-segredo" http://<IP-DO-HOST>:8000/api/status
+
+   A fila do host e a documentação da API ficam em  http://localhost:8000/docs
+   (no host; "Authorize" com a senha).
+
+
+===============================================================================
+ PARTE 6 - SE O CÓDIGO DO PAINEL MUDAR (RECOMPILAR)
 ===============================================================================
 
 Precisa de internet. Na pasta do painel:
@@ -306,58 +302,51 @@ comandos no Prompt de Comando (cmd).
  PROBLEMAS COMUNS
 ===============================================================================
 
-  Pílula SEM HOST
-      O painel não alcança a API do host. Confira, nesta ordem: a janela do
-      python -m api está aberta no host? O teste da Parte 2, passo 3
-      (curl.exe com a senha) responde? O IP em C:\SMVEP-Painel\host.txt é o
-      certo? A porta 8000 está liberada no firewall do HOST?
+  O app não consegue enviar (timeout ou "conexão recusada")
+      Confira, nesta ordem: a janela do painel está aberta? O endereço no app
+      é o que a janela do painel mostra, com a porta (:8080)? A porta 8080
+      está liberada no firewall do PAINEL (Parte 1, passo 3)? As duas
+      máquinas estão na mesma rede? O teste da Parte 2, passo 3 responde?
 
-  curl.exe .../api/status dá timeout
-      Firewall do HOST, redes diferentes ou IP errado.
+  O app recebe 401 / "UNAUTHORIZED"
+      Faltou o cabeçalho  Authorization: Bearer <senha>  ou a senha do app é
+      diferente da do token.txt do painel. A janela do painel mostra
+      "evento ... recusado (UNAUTHORIZED)".
 
-  curl.exe .../api/status responde "Token ausente ou inválido."
-      Faltou o  -H "Authorization: Bearer <senha>"  ou a senha não é a do
-      host.
+  O app recebe 422 / "IMAGE_INTEGRITY"
+      O sha256 ou o byteLength de uma foto não confere com a foto enviada
+      (foto cortada ou base64 alterado no caminho). A mensagem diz qual foto.
 
-  O python -m api fecha dizendo "Sem token, a API não sobe"
-      Defina $env:SMVEP_ENVIO_TOKEN antes de iniciar (Parte 3).
+  O app recebe 422 / "INVALID_MESSAGE"
+      Um campo está fora do formato; error.message diz qual (por exemplo,
+      "messageType: ..."). Veja o formato no README.md.
 
-  A janela do painel diz "token recusado" ou "Token: ausente"
-      Senha diferente entre as duas máquinas, ou C:\SMVEP-Painel\token.txt
-      não existe (Parte 3).
+  O app recebe 413
+      O evento passou de 50 MB. Cada foto inteira tem perto de 2 MB.
 
-  A janela do painel diz "outro painel se conectou a este host"
-      O host atende um painel por vez. Feche o outro painel; este tenta de
-      novo a cada 30 s.
+  O veículo fica NA VAGA e não sai
+      O VACATED daquela ocupação não chegou, ou chegou com outro
+      occupancyId/deviceId. A janela do painel registra cada evento gravado.
+
+  As caixas não aparecem
+      Confira se o botão CAIXAS (canto superior direito do visor) está
+      ligado. As caixas do OCCUPIED só aparecem na foto LINHA DE SNAP; a do
+      VACATED, na SAÍDA.
 
   "node" não é reconhecido / INICIAR-PAINEL.cmd fala do Node.js
       Instale o Node.js 24+ e abra um terminal novo.
 
   Erro "address already in use" / porta 8080 ocupada
       Já tem um painel aberto (feche a outra janela) ou outro programa usa a
-      porta: escolha outra com SMVEP_PORTA (Parte 4).
+      porta: escolha outra com SMVEP_PORTA (Parte 4) e use a mesma no app.
 
-  ONLINE, mas nada chega
-      Só chegam paradas ENCERRADAS. Um carro ainda na vaga só aparece quando
-      a parada fecha: na saída, no fim do vídeo ou quando o processamento é
-      parado. Confira também a fila no host (abaixo): um ciclo com
-      tentativas maiores que zero falhou e espera a vez de sair de novo, e a
-      coluna ultimo_erro diz por quê.
+  Os eventos só aparecem depois de apertar Enter na janela do painel
+      É o modo "Selecionar" do console do Windows: um clique na janela
+      congela o programa até alguém apertar Enter ou Esc. A janela do painel
+      já desliga isso ao iniciar; se acontecer, aperte Esc ou desmarque
+      "Modo de Edição Rápida" nas propriedades da janela.
 
-  Os ciclos só aparecem depois de apertar Enter numa janela
-      É o modo "Selecionar" do console do Windows (veja a Parte 1, passo 5).
-      As janelas da API e do painel já desligam isso ao iniciar. Na do
-      processamento, aperte Esc ou desmarque "Modo de Edição Rápida" nas
-      propriedades da janela.
-
-  Consultar a fila de envio no host:
-      pelo navegador:  http://localhost:8000/docs  (Authorize com a senha,
-      depois GET /api/ciclos)
-      ou pelo Python:
-
-       cd C:\Users\leosp\Desktop\CodigosVisao-Embarcado
-       python -c "import sqlite3; c=sqlite3.connect('output/smvep.db'); [print(r) for r in c.execute('SELECT r.id, r.inicio_horario, r.placa, r.encerrado_por, e.enviado, e.revisao, e.tentativas, e.ultimo_erro FROM envios e JOIN registros r USING (id) ORDER BY e.id')]"
-
-   enviado = 1: o painel confirmou; enviado = 0: ainda na fila.
-   revisao: sobe quando o registro muda depois de enviado (ele sai de novo).
-   tentativas e ultimo_erro: envios que falharam e o motivo do último.
+  Pílula SEM HOST
+      Só acontece com o host configurado (Parte 5): o painel não alcança a
+      API do host. Confira a janela do python -m api, o IP no host.txt, a
+      senha e a porta 8000 no firewall do HOST.
