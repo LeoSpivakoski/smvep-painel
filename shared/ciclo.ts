@@ -31,7 +31,8 @@ export interface Dimensoes {
 export interface EventoAplicado {
   messageId: string;
   messageType: string;
-  occurredAt: string;
+  /** `null` no VACATED de uma parada interrompida (o SMVEP não tem o horário da saída). */
+  occurredAt: string | null;
   sequence: number | null;
   receiptId: string;
   receivedAt: string;

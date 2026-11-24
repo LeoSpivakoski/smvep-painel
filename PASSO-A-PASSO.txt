@@ -60,8 +60,9 @@ COMO FUNCIONA
 
       SAÍDA             DEPARTURE_OBSERVED: a saída do carro foi vista
       VEÍCULO PERDIDO   VEHICLE_LOST: o carro sumiu sem a saída ser vista
-      FIM DO VÍDEO      END_OF_VIDEO: o vídeo acabou com o carro na vaga
+      FIM DO VÍDEO      VIDEO_END: o vídeo acabou com o carro na vaga
       INTERROMPIDO      INTERRUPTED: o processamento parou com o carro na vaga
+                        (sem horário de saída: o registro fica sem fim)
 
   O painel só responde ACCEPTED depois de gravar no disco. O app deve dar o
   evento por entregue com ACCEPTED ou DUPLICATE (o mesmo messageId já tinha

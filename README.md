@@ -81,8 +81,12 @@ exemplos (OCCUPIED e VACATED) prontos no "Try it out"; com senha, clique em
 que valida os eventos (`shared/evento.ts`), então a documentação acompanha a
 validação. Funciona sem internet.
 
-Um evento por mudança da vaga, no formato dos exemplos de
-`exemplos_json_integracao_ifsc_spark/` (01 e 03 são pedidos; 02 e 04, respostas):
+Um evento por mudança da vaga, no envelope dos exemplos de
+`exemplos_json_integracao_ifsc_spark/` (01 e 03 são pedidos; 02 e 04, respostas),
+com os nomes e valores do banco do SMVEP: quem envia é o `python -m engine.sender`
+do SMVEP, e o painel se adequa a ele. O que o SMVEP não tem vai `null`
+(`installationId`, `configVersion`, `bootId`, `sequence`, `timeQuality`,
+`cameraId`, `spaceId` e o `imageId` das fotos):
 
 ```
 POST http://<IP-DO-PAINEL>:8080/eventos
@@ -91,20 +95,20 @@ Authorization: Bearer <token>        (só se o painel tiver SMVEP_ENVIO_TOKEN)
 
 {
   "schemaVersion": "1.0",                    o painel aceita 1.x
-  "messageId": "evt-20261113-0001",          único por deviceId; repetido = DUPLICATE
+  "messageId": "70-partial",                 <occupancyId>-partial ou -final; repetido = DUPLICATE
   "messageType": "OCCUPIED",                 OCCUPIED (parou) | VACATED (saiu)
-  "deviceId": "EMB-001",
-  "occupancyId": "70",                       junta o OCCUPIED e o VACATED da mesma parada
-  "occurredAt": "2026-09-21T13:54:54.986-03:00",
-  "cameraId": "CAM-001", "spaceId": "BAY-01",          opcionais (e os outros campos do exemplo)
-  "plate": { "status": "READ", "value": "QRP7J32",        só no OCCUPIED
+  "deviceId": "jetson-01",                   nome da máquina do SMVEP
+  "occupancyId": 70,                         junta o OCCUPIED e o VACATED da mesma parada
+  "occurredAt": "2026-09-21T13:54:54.986-03:00",   null no VACATED de parada INTERRUPTED
+  "cameraId": null, "spaceId": null,         opcionais (e os outros campos do exemplo)
+  "plate": { "status": "READ", "value": "QRP7J32",        vale a do OCCUPIED
              "plateConfidence": 0.99,                    confiança do OCR → "Conf. OCR"
              "plateDetectionConfidence": 0.98,           confiança da detecção → "Conf. Det"
              "boundingBox": { "xMin": 1973, "yMin": 907, "xMax": 2085, "yMax": 953 } },
   "vehicle": { "detected": true,
                "boundingBox": { "xMin": 1569, "yMin": 615, "xMax": 2234, "yMax": 1153 } },
   "closureReason": "DEPARTURE_OBSERVED",     só no VACATED
-  "images": [ { "imageId": "210", "purpose": "PLATE_CROSSING",
+  "images": [ { "imageId": null, "purpose": "PLATE_CROSSING",
                 "mimeType": "image/jpeg", "encoding": "base64",
                 "byteLength": 1986690, "sha256": "2f71…", "base64": "<foto inteira>" } ]
 }
@@ -116,18 +120,20 @@ Como o painel monta o registro:
   (início, placa, fotos); o `VACATED` o completa (fim, duração calculada,
   motivo, foto de saída). Chegando o `VACATED` antes, os dois são aceitos e o
   registro se completa quando o outro chegar.
-- **Fotos:** `PLATE_CROSSING` → "linha de snap"; `SPACE_OVERVIEW` do
-  `OCCUPIED` → "entrada"; `SPACE_OVERVIEW` do `VACATED` → "saída". Outras
-  finalidades são aceitas, mas não aparecem.
+- **Fotos** (nomes de `ImagePurpose` do SMVEP): `PLATE_CROSSING` → "linha de
+  snap"; `PARKING_ENTRY` → "entrada" (no `OCCUPIED`); `PARKING_EXIT` → "saída"
+  (no `VACATED`). Outras finalidades são aceitas, mas não aparecem.
 - **Caixas:** estão em pixels da foto inteira. As do `OCCUPIED` (veículo e
   placa) são sempre da foto `PLATE_CROSSING`; a do `VACATED` (veículo) é da
-  `SPACE_OVERVIEW` de saída. O painel lê o tamanho real de cada JPEG para
+  `PARKING_EXIT`. O painel lê o tamanho real de cada JPEG para
   desenhá-las na escala certa; o botão **Caixas** do visor mostra e oculta.
 - **Placa:** só vem no `OCCUPIED` (`status: "READ"`), com `plateConfidence`
   (OCR) e `plateDetectionConfidence` (detecção); o nome antigo `confidence` vale
   como OCR. Uma placa no `VACATED` é ignorada (texto, confianças e caixa).
 - **Motivo do fim:** `DEPARTURE_OBSERVED` → saída, `VEHICLE_LOST` → veículo
-  perdido, `END_OF_VIDEO` → fim do vídeo, `INTERRUPTED` → interrompido.
+  perdido, `VIDEO_END` → fim do vídeo, `INTERRUPTED` → interrompido. Numa
+  parada `INTERRUPTED` o SMVEP não tem o horário da saída: `occurredAt` vem
+  `null`, e o registro fica sem fim e sem duração.
 
 Respostas (no formato dos exemplos 02 e 04):
 

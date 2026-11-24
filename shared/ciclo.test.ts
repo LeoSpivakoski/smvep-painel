@@ -44,7 +44,7 @@ describe("eventos do app", () => {
   it("converte o closureReason no motivo do fim do painel", () => {
     assert.equal(motivoDoFim("DEPARTURE_OBSERVED"), "saida");
     assert.equal(motivoDoFim("VEHICLE_LOST"), "veiculo_perdido");
-    assert.equal(motivoDoFim("END_OF_VIDEO"), "fim_do_video");
+    assert.equal(motivoDoFim("VIDEO_END"), "fim_do_video");
     assert.equal(motivoDoFim("INTERRUPTED"), "interrompido");
     assert.equal(motivoDoFim("NEW_REASON"), "new_reason");
     assert.equal(motivoDoFim(null), "saida");

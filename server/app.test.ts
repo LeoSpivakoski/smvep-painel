@@ -599,7 +599,7 @@ describe("eventos empurrados pelo app (POST /eventos)", () => {
       },
       vehicle: { detected: true, boundingBox: { xMin: 1569, yMin: 615, xMax: 2234, yMax: 1153 } },
       evidenceStatus: "AVAILABLE",
-      images: [imagem("PLATE_CROSSING", FOTO_INTEIRA), imagem("SPACE_OVERVIEW", FOTO_INTEIRA)],
+      images: [imagem("PLATE_CROSSING", FOTO_INTEIRA), imagem("PARKING_ENTRY", FOTO_INTEIRA)],
       ...alterar,
     };
   }
@@ -618,7 +618,7 @@ describe("eventos empurrados pelo app (POST /eventos)", () => {
       vehicle: { detected: true, boundingBox: { xMin: 970, yMin: 523, xMax: 1867, yMax: 1001 } },
       closureReason: "DEPARTURE_OBSERVED",
       evidenceStatus: "AVAILABLE",
-      images: [imagem("SPACE_OVERVIEW", FOTO_SAIDA)],
+      images: [imagem("PARKING_EXIT", FOTO_SAIDA)],
       ...alterar,
     };
   }
@@ -737,6 +737,69 @@ describe("eventos empurrados pelo app (POST /eventos)", () => {
     assert.ok(ciclo.fotos.linha && ciclo.fotos.entrada && ciclo.fotos.saida);
   });
 
+  it("eventos do SMVEP (engine.sender): nomes do banco, imageId e campos sem origem null", async () => {
+    await iniciarSemHost();
+    const semOrigem = {
+      installationId: null,
+      configVersion: null,
+      bootId: null,
+      sequence: null,
+      timeQuality: null,
+      cameraId: null,
+      spaceId: null,
+    };
+    const entrada = await enviar(
+      ocupado({
+        ...semOrigem,
+        messageId: "70-partial",
+        occupancyId: 70,
+        images: [
+          imagem("PLATE_CROSSING", FOTO_INTEIRA, { imageId: null, capturedAt: "2026-09-21T13:54:54.035-03:00" }),
+          imagem("PARKING_ENTRY", FOTO_INTEIRA, { imageId: null }),
+        ],
+      }),
+    );
+    assert.equal(entrada.statusCode, 200, entrada.body);
+    assert.equal(entrada.json().result, "ACCEPTED");
+    const saida = await enviar(
+      liberado({
+        ...semOrigem,
+        messageId: "70-final",
+        occupancyId: 70,
+        plate: { status: "READ", value: "QRP7J32", plateConfidence: 0.99, plateDetectionConfidence: 0.98 },
+        closureReason: "VIDEO_END",
+        images: [imagem("PARKING_EXIT", FOTO_SAIDA, { imageId: null })],
+      }),
+    );
+    assert.equal(saida.statusCode, 200, saida.body);
+    assert.equal(saida.json().result, "ACCEPTED");
+
+    const ciclo = await cicloDaOcupacao();
+    assert.equal(ciclo.id, 70);
+    assert.equal(ciclo.situacao, "encerrada");
+    assert.equal(ciclo.encerrado_por, "fim_do_video");
+    assert.equal(ciclo.placa?.texto, "QRP7J32");
+    assert.ok(ciclo.fotos.linha && ciclo.fotos.entrada && ciclo.fotos.saida);
+    assert.equal(ciclo.caixas?.linha?.length, 2);
+    assert.deepEqual(ciclo.caixas?.saida, [{ tipo: "veiculo", xMin: 970, yMin: 523, xMax: 1867, yMax: 1001 }]);
+    assert.deepEqual(ciclo.dimensoes?.saida, { largura: 2688, altura: 1520 });
+  });
+
+  it("VACATED de parada interrompida (sem horário de saída): occurredAt null é aceito", async () => {
+    await iniciarSemHost();
+    await enviar(ocupado());
+    const resposta = await enviar(
+      liberado({ occurredAt: null, closureReason: "INTERRUPTED", vehicle: { detected: false, boundingBox: null }, images: [] }),
+    );
+    assert.equal(resposta.statusCode, 200, resposta.body);
+    assert.equal(resposta.json().result, "ACCEPTED");
+    const ciclo = await cicloDaOcupacao();
+    assert.equal(ciclo.situacao, "encerrada");
+    assert.equal(ciclo.encerrado_por, "interrompido");
+    assert.equal(ciclo.fim_horario, null);
+    assert.equal(ciclo.duracao_min, null);
+  });
+
   it("a placa só vem no OCCUPIED: a do VACATED (texto, confianças e caixa) é ignorada", async () => {
     await iniciarSemHost();
     await enviar(ocupado());
@@ -773,7 +836,7 @@ describe("eventos empurrados pelo app (POST /eventos)", () => {
 
   it("as caixas do OCCUPIED são sempre da foto PLATE_CROSSING, mesmo sem ela no evento", async () => {
     await iniciarSemHost();
-    await enviar(ocupado({ images: [imagem("SPACE_OVERVIEW", FOTO_INTEIRA)] }));
+    await enviar(ocupado({ images: [imagem("PARKING_ENTRY", FOTO_INTEIRA)] }));
     const ciclo = await cicloDaOcupacao();
     assert.equal(ciclo.fotos.linha, null);
     assert.ok(ciclo.fotos.entrada);
@@ -829,7 +892,7 @@ describe("eventos empurrados pelo app (POST /eventos)", () => {
     assert.equal(shaErrado.json().error.code, "IMAGE_INTEGRITY");
     assert.match(shaErrado.json().error.message, /sha256/);
 
-    const tamanhoErrado = await enviar(ocupado({ images: [imagem("SPACE_OVERVIEW", FOTO_INTEIRA, { byteLength: 5 })] }));
+    const tamanhoErrado = await enviar(ocupado({ images: [imagem("PARKING_ENTRY", FOTO_INTEIRA, { byteLength: 5 })] }));
     assert.equal(tamanhoErrado.statusCode, 422);
     assert.match(tamanhoErrado.json().error.message, /byteLength/);
     assert.equal((await listar()).total, 0);
@@ -842,7 +905,7 @@ describe("eventos empurrados pelo app (POST /eventos)", () => {
       [{ occupancyId: "" }, /occupancyId/],
       [{ occurredAt: "ontem" }, /occurredAt/],
       [{ plate: { status: "READ", value: "X", boundingBox: { xMin: 10, yMin: 0, xMax: 5, yMax: 3 } } }, /plate/],
-      [{ images: [{ ...imagem("SPACE_OVERVIEW", FOTO_INTEIRA), mimeType: "image/png" }] }, /mimeType/],
+      [{ images: [{ ...imagem("PARKING_ENTRY", FOTO_INTEIRA), mimeType: "image/png" }] }, /mimeType/],
     ];
     for (const [alterar, campo] of casos) {
       const resposta = await enviar(ocupado(alterar));
@@ -883,7 +946,7 @@ describe("eventos empurrados pelo app (POST /eventos)", () => {
       Buffer.from([0xff, 0xd9]),
     ]);
     const resposta = await enviar(
-      ocupado({ images: [imagem("PLATE_CROSSING", grande), imagem("SPACE_OVERVIEW", grande)] }),
+      ocupado({ images: [imagem("PLATE_CROSSING", grande), imagem("PARKING_ENTRY", grande)] }),
     );
     assert.equal(resposta.statusCode, 200);
   });

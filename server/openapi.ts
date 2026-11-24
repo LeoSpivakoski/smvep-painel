@@ -22,9 +22,11 @@ const JPEG_EXEMPLO = Buffer.from([
   0x01, 0xff, 0xd9,
 ]);
 
-function imagemExemplo(imageId: string, purpose: string, capturedAt: string) {
+// Exemplos no formato exato do `python -m engine.sender` do SMVEP: o que o banco
+// não tem vai null, e as fotos não têm imageId.
+function imagemExemplo(purpose: string, capturedAt: string) {
   return {
-    imageId,
+    imageId: null,
     purpose,
     capturedAt,
     mimeType: "image/jpeg",
@@ -40,14 +42,14 @@ const EXEMPLO_OCCUPIED = {
   messageId: "evt-exemplo-0001",
   messageType: "OCCUPIED",
   deviceId: "EMB-001",
-  installationId: "PONTO-001",
-  configVersion: 1,
-  bootId: "boot-7721",
-  sequence: 104,
+  installationId: null,
+  configVersion: null,
+  bootId: null,
+  sequence: null,
   occurredAt: "2026-09-21T13:54:54.986-03:00",
-  timeQuality: "SYNCED",
-  cameraId: "CAM-001",
-  spaceId: "BAY-01",
+  timeQuality: null,
+  cameraId: null,
+  spaceId: null,
   occupancyId: "exemplo-70",
   plate: {
     status: "READ",
@@ -59,8 +61,8 @@ const EXEMPLO_OCCUPIED = {
   vehicle: { detected: true, boundingBox: { xMin: 1569, yMin: 615, xMax: 2234, yMax: 1153 } },
   evidenceStatus: "AVAILABLE",
   images: [
-    imagemExemplo("210", "PLATE_CROSSING", "2026-09-21T13:54:54.035-03:00"),
-    imagemExemplo("211", "SPACE_OVERVIEW", "2026-09-21T13:54:54.986-03:00"),
+    imagemExemplo("PLATE_CROSSING", "2026-09-21T13:54:54.035-03:00"),
+    imagemExemplo("PARKING_ENTRY", "2026-09-21T13:54:54.986-03:00"),
   ],
 };
 
@@ -69,19 +71,20 @@ const EXEMPLO_VACATED = {
   messageId: "evt-exemplo-0002",
   messageType: "VACATED",
   deviceId: "EMB-001",
-  installationId: "PONTO-001",
-  configVersion: 1,
-  bootId: "boot-7721",
-  sequence: 105,
+  installationId: null,
+  configVersion: null,
+  bootId: null,
+  sequence: null,
   occurredAt: "2026-09-21T13:56:56.540-03:00",
-  timeQuality: "SYNCED",
-  cameraId: "CAM-001",
-  spaceId: "BAY-01",
+  timeQuality: null,
+  cameraId: null,
+  spaceId: null,
   occupancyId: "exemplo-70",
+  plate: { status: "READ", value: "QRP7J32", plateConfidence: 0.99, plateDetectionConfidence: 0.98 },
   vehicle: { detected: true, boundingBox: { xMin: 970, yMin: 523, xMax: 1867, yMax: 1001 } },
   closureReason: "DEPARTURE_OBSERVED",
   evidenceStatus: "AVAILABLE",
-  images: [imagemExemplo("212", "SPACE_OVERVIEW", "2026-09-21T13:56:56.540-03:00")],
+  images: [imagemExemplo("PARKING_EXIT", "2026-09-21T13:56:56.540-03:00")],
 };
 
 const identificacao = {
@@ -280,9 +283,12 @@ export function documentoOpenApi({ versao, rotaEventos, limiteCorpoMb }: OpcoesD
           description: [
             "Grava o evento e atualiza a tela na hora.",
             "",
-            "- **Fotos:** `PLATE_CROSSING` → linha de snap; `SPACE_OVERVIEW` → entrada (OCCUPIED) ou saída (VACATED). `sha256` e `byteLength`, se vierem, precisam conferir.",
-            "- **Caixas:** as do OCCUPIED (veículo e placa) são da foto `PLATE_CROSSING`; a do VACATED (veículo), da `SPACE_OVERVIEW` de saída.",
-            "- **Placa:** só no OCCUPIED, com `plateConfidence` (OCR) e `plateDetectionConfidence` (detecção).",
+            "Formato do `python -m engine.sender` do SMVEP: nomes do banco dele, e `null` no que ele não tem.",
+            "",
+            "- **Fotos:** `PLATE_CROSSING` → linha de snap; `PARKING_ENTRY` → entrada (OCCUPIED); `PARKING_EXIT` → saída (VACATED). `sha256` e `byteLength`, se vierem, precisam conferir.",
+            "- **Caixas:** as do OCCUPIED (veículo e placa) são da foto `PLATE_CROSSING`; a do VACATED (veículo), da `PARKING_EXIT`.",
+            "- **Placa:** vale a do OCCUPIED, com `plateConfidence` (OCR) e `plateDetectionConfidence` (detecção); a do VACATED é ignorada.",
+            "- **Motivo do fim** (`closureReason`, VACATED): `DEPARTURE_OBSERVED`, `VEHICLE_LOST`, `VIDEO_END` ou `INTERRUPTED`; na parada `INTERRUPTED`, `occurredAt` pode vir `null`.",
             `- Corpo de até ${limiteCorpoMb} MB.`,
           ].join("\n"),
           security: [{ token: [] }, {}],

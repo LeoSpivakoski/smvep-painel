@@ -24,10 +24,11 @@ export const esquemaCaixa = descrito(
 const textoOpcional = z.string().nullable().optional();
 
 export const esquemaImagem = z.looseObject({
-  imageId: z.union([z.string(), z.number()]).transform(String).optional(),
+  // O SMVEP não numera as fotos: manda `null`.
+  imageId: z.union([z.string(), z.number()]).transform(String).nullable().optional(),
   purpose: descrito(
     z.string().min(1),
-    "PLATE_CROSSING (veículo cruzando a linha de snap) ou SPACE_OVERVIEW (vista da vaga: entrada no OCCUPIED, saída no VACATED). Outras finalidades são aceitas, mas não aparecem na tela.",
+    "Nomes do SMVEP: PLATE_CROSSING (veículo cruzando a linha de snap), PARKING_ENTRY (entrada, no OCCUPIED) ou PARKING_EXIT (saída, no VACATED). Outras finalidades são aceitas, mas não aparecem na tela.",
   ),
   capturedAt: textoOpcional,
   mimeType: z.literal("image/jpeg"),
@@ -65,8 +66,11 @@ export const esquemaEvento = z.looseObject({
   bootId: textoOpcional,
   sequence: z.number().nullable().optional(),
   occurredAt: descrito(
-    z.string().refine((texto) => !Number.isNaN(Date.parse(texto)), "occurredAt não é uma data ISO 8601"),
-    "Quando aconteceu (ISO 8601): início da parada no OCCUPIED, fim no VACATED.",
+    z
+      .string()
+      .refine((texto) => !Number.isNaN(Date.parse(texto)), "occurredAt não é uma data ISO 8601")
+      .nullable(),
+    "Quando aconteceu (ISO 8601): início da parada no OCCUPIED, fim no VACATED. null quando o SMVEP não tem o horário (VACATED de parada INTERRUPTED).",
   ),
   timeQuality: textoOpcional,
   cameraId: textoOpcional,
@@ -103,14 +107,14 @@ export const esquemaEvento = z.looseObject({
       detected: z.boolean().optional(),
       boundingBox: descrito(
         esquemaCaixa.nullable().optional(),
-        "Caixa do veículo: na foto PLATE_CROSSING (OCCUPIED) ou na SPACE_OVERVIEW de saída (VACATED).",
+        "Caixa do veículo: na foto PLATE_CROSSING (OCCUPIED) ou na PARKING_EXIT (VACATED).",
       ),
     })
     .nullable()
     .optional(),
   closureReason: descrito(
     textoOpcional,
-    "Só no VACATED: DEPARTURE_OBSERVED, VEHICLE_LOST, END_OF_VIDEO ou INTERRUPTED (outros valores aparecem como vieram).",
+    "Só no VACATED, com os valores do SMVEP: DEPARTURE_OBSERVED, VEHICLE_LOST, VIDEO_END ou INTERRUPTED (outros valores aparecem como vieram).",
   ),
   evidenceStatus: textoOpcional,
   images: descrito(z.array(esquemaImagem).max(10).default([]), "Fotos inteiras do evento (até 10)."),
@@ -131,7 +135,7 @@ export function motivoDoFim(motivo: string | null | undefined): string {
       return "saida";
     case "VEHICLE_LOST":
       return "veiculo_perdido";
-    case "END_OF_VIDEO":
+    case "VIDEO_END":
       return "fim_do_video";
     case "INTERRUPTED":
       return "interrompido";

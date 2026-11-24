@@ -72,11 +72,15 @@ export function chaveDaOcupacao(evento: Pick<EventoRecebido, "deviceId" | "occup
   return `${evento.deviceId}:${evento.occupancyId}`;
 }
 
-/** Foto do evento → lugar no visor do painel. */
-function lugarDaFoto(tipo: EventoRecebido["messageType"], purpose: string): NomeFoto | null {
-  if (purpose === "PLATE_CROSSING") return "linha";
-  if (purpose === "SPACE_OVERVIEW") return tipo === "OCCUPIED" ? "entrada" : "saida";
-  return null;
+/** Foto do evento → lugar no visor do painel (nomes de ImagePurpose do SMVEP). */
+const LUGAR_DA_FOTO: Record<string, NomeFoto> = {
+  PLATE_CROSSING: "linha",
+  PARKING_ENTRY: "entrada",
+  PARKING_EXIT: "saida",
+};
+
+function lugarDaFoto(purpose: string): NomeFoto | null {
+  return LUGAR_DA_FOTO[purpose] ?? null;
 }
 
 interface FotoDecodificada {
@@ -98,7 +102,7 @@ function decodificarFotos(evento: EventoRecebido): FotoDecodificada[] | string {
       const sha = createHash("sha256").update(bytes).digest("hex");
       if (sha !== imagem.sha256.toLowerCase()) return `${nome}: sha256 não confere com a foto recebida`;
     }
-    const lugar = lugarDaFoto(evento.messageType, imagem.purpose);
+    const lugar = lugarDaFoto(imagem.purpose);
     // Finalidade desconhecida: a foto é aceita (íntegra), mas não tem lugar no visor.
     if (lugar && !fotos.some((foto) => foto.lugar === lugar)) {
       fotos.push({ lugar, bytes, dimensoes: dimensoesJpeg(bytes) });
@@ -110,7 +114,7 @@ function decodificarFotos(evento: EventoRecebido): FotoDecodificada[] | string {
 /**
  * Foto onde as caixas do evento são desenhadas. No OCCUPIED, sempre a do
  * veículo cruzando a linha (PLATE_CROSSING), mesmo que o evento não traga essa
- * foto. No VACATED, a vista da vaga na saída (SPACE_OVERVIEW).
+ * foto. No VACATED, a foto de saída (PARKING_EXIT).
  */
 function lugarDasCaixas(tipo: EventoRecebido["messageType"]): NomeFoto {
   return tipo === "OCCUPIED" ? "linha" : "saida";
