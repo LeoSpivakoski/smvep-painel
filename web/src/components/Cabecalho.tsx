@@ -32,7 +32,7 @@ export function Cabecalho({ conexao }: { conexao: Conexao }) {
   return (
     <header className="cabecalho">
       <div className="marca">
-        <span className="logo">SMVEP</span>
+        <img className="logo-img" src="/logo.png" alt="SMVEP" />
         <span className="marca-divisor" aria-hidden="true" />
         <h1>Sistema de monitoramento de vagas</h1>
       </div>

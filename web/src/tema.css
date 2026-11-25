@@ -1,31 +1,30 @@
 /*
- * Tema do painel, a partir do Figma "Sistema de monitoramento".
- * As cores foram tiradas das capturas da tela (o Dev Mode do Figma exige login):
- * ajuste aqui se o design tiver valores exatos diferentes.
+- Tema do painel alinhado à identidade visual do SMVEP (webserver).
+- Layout preservado; apenas paleta de cores, tipografia de apoio e estilo da logo atualizados.
  */
 :root {
-  --fundo: #070b14;
-  --cabecalho: #0a101c;
-  --painel: #0c1321;
-  --painel-borda: #1a2538;
-  --visor: #04070d;
-  --cartao: #0f1828;
-  --cartao-hover: #14203a;
-  --campo: #111a2b;
-  --separador: #1c2739;
+  --fundo: #101416;
+  --cabecalho: #101416;
+  --painel: #191f21;
+  --painel-borda: #303b3b;
+  --visor: #0a0e0f;
+  --cartao: #191f21;
+  --cartao-hover: #222a2b;
+  --campo: #141a1b;
+  --separador: #303b3b;
 
-  --texto: #e8eef8;
-  --texto-suave: #8a97ac;
-  --texto-fraco: #5a677c;
+  --texto: #f3f5f3;
+  --texto-suave: #a0ada7;
+  --texto-fraco: #7c8a85;
 
-  --ciano: #22d3ee;
-  --ciano-fundo: rgba(34, 211, 238, 0.08);
-  --verde: #34d399;
-  --verde-fundo: rgba(52, 211, 153, 0.12);
-  --ambar: #f5a524;
-  --ambar-fundo: rgba(245, 165, 36, 0.12);
-  --vermelho: #f87171;
-  --vermelho-fundo: rgba(248, 113, 113, 0.12);
+  --ciano: #a2f4cb;
+  --ciano-fundo: rgba(162, 244, 203, 0.08);
+  --verde: #a2f4cb;
+  --verde-fundo: #1c2b25;
+  --ambar: #e8c182;
+  --ambar-fundo: rgba(232, 193, 130, 0.14);
+  --vermelho: #ff9a9a;
+  --vermelho-fundo: rgba(255, 154, 154, 0.14);
 
   --placa-azul: #1f5fbf;
   --placa-borda: #0b1220;
@@ -158,6 +157,14 @@ button {
   font-size: 20px;
   font-weight: 800;
   letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+}
+
+.logo-img {
+  width: 136px;
+  height: auto;
+  display: block;
 }
 
 .marca-divisor {
@@ -167,10 +174,12 @@ button {
 }
 
 .marca h1 {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
+  color: var(--texto-suave);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -207,11 +216,11 @@ button {
 .conexao-online {
   color: var(--verde);
   background: var(--verde-fundo);
-  border-color: rgba(52, 211, 153, 0.3);
+  border-color: #355345;
 }
 
 .conexao-online .conexao-ponto {
-  box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
+  box-shadow: 0 0 0 0 rgba(162, 244, 203, 0.6);
   animation: pulso 2s ease-out infinite;
 }
 
@@ -220,27 +229,29 @@ button {
 .conexao-reconectando {
   color: var(--ambar);
   background: var(--ambar-fundo);
-  border-color: rgba(245, 165, 36, 0.3);
+  border-color: rgba(232, 193, 130, 0.35);
 }
 
 .conexao-offline {
   color: var(--vermelho);
   background: var(--vermelho-fundo);
-  border-color: rgba(248, 113, 113, 0.3);
+  border-color: #563939;
 }
 
 .relogio {
-  font-size: 15px;
-  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--texto-suave);
   font-variant-numeric: tabular-nums;
 }
 
 @keyframes pulso {
   70% {
-    box-shadow: 0 0 0 6px rgba(52, 211, 153, 0);
+    box-shadow: 0 0 0 6px rgba(162, 244, 203, 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+    box-shadow: 0 0 0 0 rgba(162, 244, 203, 0);
   }
 }
 
@@ -264,7 +275,7 @@ button {
   padding: 4px 10px;
   border: 1px solid var(--ciano);
   border-radius: 4px;
-  background: rgba(4, 7, 13, 0.75);
+  background: rgba(10, 14, 15, 0.8);
   color: var(--ciano);
   font-size: 11px;
   font-weight: 700;
@@ -286,7 +297,7 @@ button {
 .origem {
   padding: 4px 10px;
   border-radius: 4px;
-  background: rgba(4, 7, 13, 0.75);
+  background: rgba(10, 14, 15, 0.8);
   color: var(--texto-suave);
   font-size: 11px;
 }
@@ -326,7 +337,7 @@ button {
   transform: translateY(-50%);
   border: 1px solid var(--painel-borda);
   border-radius: 50%;
-  background: rgba(10, 16, 28, 0.85);
+  background: rgba(20, 25, 27, 0.85);
   color: var(--texto);
   cursor: pointer;
   transition:
@@ -338,7 +349,7 @@ button {
 .visor-seta:hover {
   border-color: var(--ciano);
   color: var(--ciano);
-  background: rgba(10, 16, 28, 0.95);
+  background: rgba(20, 25, 27, 0.95);
 }
 
 .visor-seta-anterior {
@@ -362,7 +373,7 @@ button {
   transform: translateX(-50%);
   border: 1px solid var(--painel-borda);
   border-radius: 999px;
-  background: rgba(10, 16, 28, 0.9);
+  background: rgba(20, 25, 27, 0.92);
 }
 
 .visor-opcao {
@@ -388,7 +399,7 @@ button {
 
 .visor-opcao[aria-pressed="true"] {
   background: var(--ciano);
-  color: #04070d;
+  color: #14251d;
 }
 
 .visor-opcao-sem-foto:not([aria-pressed="true"]) {
@@ -428,7 +439,7 @@ button {
 .caixa-rotulo text {
   font-weight: 700;
   letter-spacing: 0.04em;
-  fill: #04070d;
+  fill: #14251d;
 }
 
 .caixa-veiculo .caixa-rotulo rect {
@@ -446,7 +457,7 @@ button {
   padding: 3px 10px;
   border: 1px solid var(--painel-borda);
   border-radius: 999px;
-  background: rgba(4, 7, 13, 0.8);
+  background: rgba(10, 14, 15, 0.8);
   color: var(--texto-suave);
   font: inherit;
   font-size: 11px;
@@ -464,9 +475,9 @@ button {
 }
 
 .visor-caixas[aria-pressed="true"] {
-  border-color: rgba(34, 211, 238, 0.45);
+  border-color: rgba(162, 244, 203, 0.45);
   color: var(--ciano);
-  background: rgba(4, 7, 13, 0.85);
+  background: rgba(10, 14, 15, 0.85);
 }
 
 .visor-caixas:focus-visible {
@@ -484,6 +495,10 @@ button {
 }
 
 .historico .titulo-secao {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
   color: var(--texto-suave);
 }
 
@@ -536,7 +551,7 @@ button {
   height: 72px;
   overflow: hidden;
   border-radius: var(--raio-pequeno);
-  background: #1b2638;
+  background: #222a2b;
   color: var(--texto-fraco);
   font-size: 11px;
   font-weight: 700;
@@ -597,8 +612,8 @@ button {
 .detalhes {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: var(--espaco);
+  gap: 14px;
+  padding: 18px;
   min-height: 0;
   overflow-y: auto;
 }
@@ -610,35 +625,40 @@ button {
   gap: 12px;
 }
 
-.selo {
-  padding: 4px 10px;
-  border: 1px solid currentColor;
-  border-radius: 4px;
-  font-size: 10px;
-  font-weight: 700;
+.detalhes-topo h2 {
+  font: 600 11px / 1.3 ui-monospace, SFMono-Regular, Consolas, monospace;
   letter-spacing: 0.06em;
+  color: #d9e4de;
+}
+
+.selo {
+  padding: 4px 9px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  font: 600 10px / 1.3 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
 .selo-verde {
   color: var(--verde);
   background: var(--verde-fundo);
-  border-color: rgba(52, 211, 153, 0.35);
+  border-color: #355345;
 }
 
 .selo-ambar {
   color: var(--ambar);
   background: var(--ambar-fundo);
-  border-color: rgba(245, 165, 36, 0.35);
+  border-color: rgba(232, 193, 130, 0.35);
 }
 
 .foto-saida {
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  height: 170px;
+  height: 165px;
   overflow: hidden;
-  border: 1px solid var(--painel-borda);
+  border: 1px solid #2d3837;
   border-radius: var(--raio-pequeno);
   background: var(--campo);
 }
@@ -654,8 +674,7 @@ a.foto-saida {
 }
 
 .foto-saida .vazio {
-  font-size: 11px;
-  font-weight: 600;
+  font: 500 11px / 1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -669,7 +688,7 @@ a.foto-saida {
   border: 3px solid var(--placa-borda);
   border-radius: 8px;
   background: #fff;
-  box-shadow: 0 0 0 1px #3a4458;
+  box-shadow: 0 0 0 1px #394544;
 }
 
 .placa-faixa {
@@ -711,75 +730,126 @@ a.foto-saida {
   letter-spacing: 0.08em;
 }
 
-/* Grade de campos */
-.grade {
+/* Cartões de confiança no padrão de telemetria do webserver */
+.metrica-grade {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
 
-.campo {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.metrica-card {
+  min-width: 0;
+  display: grid;
   gap: 8px;
-  min-height: 40px;
-  padding: 8px 12px;
+  align-content: start;
+  padding: 10px 12px;
+  background: #141a1b;
+  border: 1px solid #2d3837;
   border-radius: var(--raio-pequeno);
-  background: var(--campo);
 }
 
-.campo-largo {
-  grid-column: 1 / -1;
+.metrica-cabecalho {
+  display: grid;
+  gap: 4px;
 }
 
-.campo dt {
+.metrica-cabecalho span {
   color: var(--texto-suave);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.metrica-cabecalho strong {
+  font-size: 22px;
+  font-weight: 550;
+  line-height: 1.1;
+  color: var(--texto);
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.metrica-cabecalho strong.sem-valor {
+  color: var(--texto-fraco);
+}
+
+.metrica-barra {
+  height: 4px;
+  border-radius: 4px;
+  background: #2b3836;
+  overflow: hidden;
+}
+
+.metrica-barra i {
+  display: block;
+  height: 100%;
+  background: var(--ciano);
+  border-radius: inherit;
+  transition: width 0.35s ease;
+}
+
+/* Lista limpa de tempos e status (estilo Diagnóstico Local do webserver) */
+.detalhes-secao {
+  border-top: 1px solid var(--separador);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.detalhes-subtitulo {
+  font: 500 10px / 1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
+  color: var(--texto-suave);
+}
+
+.detalhes-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.detalhe-linha {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.detalhe-linha dt {
+  color: var(--texto-suave);
+  font-weight: 400;
   white-space: nowrap;
 }
 
-.campo dd {
-  font-size: 14px;
-  font-weight: 700;
+.detalhe-linha dd {
+  color: #e1e9e5;
+  font-size: 12px;
+  font-weight: 600;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-.campo-compacto dd {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.campo dd.ciano {
+.detalhe-linha dd.ciano {
   color: var(--ciano);
 }
 
-.campo dd.verde {
+.detalhe-linha dd.verde {
   color: var(--verde);
 }
 
-.campo dd.ambar {
+.detalhe-linha dd.ambar {
   color: var(--ambar);
 }
 
-.campo dd.vermelho {
+.detalhe-linha dd.vermelho {
   color: var(--vermelho);
 }
 
-.campo dd.sem-valor {
+.detalhe-linha dd.sem-valor {
   color: var(--texto-fraco);
-}
-
-.separador {
-  width: 100%;
-  height: 1px;
-  margin: 0;
-  border: 0;
-  background: var(--separador);
 }
 
 /* ---------- Telas menores ---------- */
@@ -811,13 +881,17 @@ a.foto-saida {
     padding-bottom: 10px;
   }
 
+  .logo-img {
+    width: 115px;
+  }
+
   .marca-divisor,
   .marca h1 {
     display: none;
   }
 
   .relogio {
-    font-size: 13px;
+    font-size: 11px;
   }
 
   .historico-lista {

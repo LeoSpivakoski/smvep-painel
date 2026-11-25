@@ -16,20 +16,41 @@ const ENCERRAMENTOS: Record<string, { texto: string; tom: Tom }> = {
   interrompido: { texto: "INTERROMPIDO", tom: "vermelho" },
 };
 
-interface CampoProps {
+function percentualConfianca(valor: number | null | undefined): number {
+  if (typeof valor !== "number" || !Number.isFinite(valor)) return 0;
+  const pct = valor <= 1 ? valor * 100 : valor;
+  return Math.max(0, Math.min(100, pct));
+}
+
+function MetricaConfianca({ rotulo, valor }: { rotulo: string; valor: number | null | undefined }) {
+  const texto = formatarConfianca(valor);
+  const vazio = texto === null || texto === undefined || texto === "";
+  const pct = vazio ? 0 : percentualConfianca(valor);
+
+  return (
+    <div className="metrica-card">
+      <div className="metrica-cabecalho">
+        <span>{rotulo}</span>
+        <strong className={vazio ? "sem-valor" : undefined}>{vazio ? "—" : texto}</strong>
+      </div>
+      <div className="metrica-barra" aria-hidden="true">
+        <i style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+interface LinhaDetalheProps {
   rotulo: string;
   valor: ReactNode;
   tom?: Tom;
-  largo?: boolean;
-  compacto?: boolean;
 }
 
-function Campo({ rotulo, valor, tom, largo, compacto }: CampoProps) {
-  const classes = ["campo", largo && "campo-largo", compacto && "campo-compacto"].filter(Boolean).join(" ");
+function LinhaDetalhe({ rotulo, valor, tom }: LinhaDetalheProps) {
   const vazio = valor === null || valor === undefined || valor === "";
   return (
-    <div className={classes}>
-      <dt>{rotulo}</dt>
+    <div className="detalhe-linha">
+      <dt>{rotulo}:</dt>
       <dd className={vazio ? "sem-valor" : tom}>{vazio ? "—" : valor}</dd>
     </div>
   );
@@ -82,25 +103,24 @@ export function DetalhesRegistro({ ciclo }: { ciclo: Ciclo | null }) {
 
       <PlacaMercosul texto={placa?.texto ?? null} semPlaca={ciclo ? "SEM LEITURA" : "– – –"} />
 
-      <dl className="grade">
-        <Campo rotulo="Conf. OCR" valor={formatarConfianca(placa?.confianca_ocr)} tom="verde" />
-        <Campo rotulo="Conf. Det" valor={formatarConfianca(placa?.confianca_deteccao)} tom="verde" />
-      </dl>
-      <hr className="separador" />
-      <dl className="grade">
-        <Campo rotulo="Início" valor={formatarDiaHora(ciclo?.inicio_horario)} compacto />
-        <Campo rotulo="Fim" valor={formatarDiaHora(ciclo?.fim_horario)} compacto />
-        <Campo rotulo="Duração" valor={formatarMinutos(ciclo?.duracao_min)} largo />
-      </dl>
-      <hr className="separador" />
-      <dl className="grade">
-        <Campo
-          rotulo={encerramento === NA_VAGA ? "Situação" : "Encerrado por"}
-          valor={encerramento?.texto}
-          tom={encerramento?.tom}
-          largo
-        />
-      </dl>
+      <div className="metrica-grade">
+        <MetricaConfianca rotulo="Conf. OCR" valor={placa?.confianca_ocr} />
+        <MetricaConfianca rotulo="Conf. Det" valor={placa?.confianca_deteccao} />
+      </div>
+
+      <div className="detalhes-secao">
+        <span className="detalhes-subtitulo">Registro / Tempos</span>
+        <dl className="detalhes-lista">
+          <LinhaDetalhe rotulo="Início" valor={formatarDiaHora(ciclo?.inicio_horario)} />
+          <LinhaDetalhe rotulo="Fim" valor={formatarDiaHora(ciclo?.fim_horario)} />
+          <LinhaDetalhe rotulo="Duração" valor={formatarMinutos(ciclo?.duracao_min)} />
+          <LinhaDetalhe
+            rotulo={encerramento === NA_VAGA ? "Situação" : "Encerrado por"}
+            valor={encerramento?.texto}
+            tom={encerramento?.tom}
+          />
+        </dl>
+      </div>
     </aside>
   );
 }
